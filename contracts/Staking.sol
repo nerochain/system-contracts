@@ -248,7 +248,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     )
         external
         // #if Mainnet
-        onlyMiner
+        onlyEngine
         // #endif
         onlyOperateOnce(Operation.UpdateValidators)
         onlyBlockEpoch
@@ -264,7 +264,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     )
         external
         // #if Mainnet
-        onlyMiner
+        onlyEngine
         // #endif
         onlyOperateOnce(Operation.UpdateRewardsPerBlock)
     {
@@ -281,7 +281,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         external
         payable
         // #if Mainnet
-        onlyMiner
+        onlyEngine
         // #endif
         onlyOperateOnce(Operation.DistributeFee)
     {
@@ -307,7 +307,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     )
         external
         // #if Mainnet
-        onlyMiner
+        onlyEngine
         // #endif
         onlyExists(_val)
         onlyOperateOnce(Operation.LazyPunish)
@@ -332,7 +332,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     function decreaseMissedBlocksCounter()
         external
         // #if Mainnet
-        onlyMiner
+        onlyEngine
         // #endif
         onlyBlockEpoch
         onlyOperateOnce(Operation.DecreaseMissingBlockCounter)
@@ -372,7 +372,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     )
         external
         // #if Mainnet
-        onlyMiner
+        onlyEngine
         // #endif
         onlyExists(_val)
         onlyNotDoubleSignPunished(_punishHash)
@@ -780,22 +780,6 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     }
 
     // #if !Mainnet
-    function getBasicLockEnd() public view returns (uint256) {
-        return basicLockEnd;
-    }
-
-    function getReleasePeriod() public view returns (uint256) {
-        return releasePeriod;
-    }
-
-    function getReleaseCount() public view returns (uint256) {
-        return releaseCount;
-    }
-
-    function getTotalStakingRewards() public view returns (uint256) {
-        return totalStakingRewards;
-    }
-
     function simulateUpdateRewardsRecord() public view returns (uint256) {
         uint deltaBlock = block.number - lastUpdateAccBlock;
         if (deltaBlock > 0) {

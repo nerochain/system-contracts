@@ -21,7 +21,7 @@ contract Params {
     uint256 public constant DecreaseRate = 1; // the allowable amount of missing blocks in one epoch for each validator
 
 
-    modifier onlyMiner() {
+    modifier onlyEngine() {
         require(msg.sender == block.coinbase, "E40");
         _;
     }

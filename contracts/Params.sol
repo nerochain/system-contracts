@@ -3,6 +3,11 @@ pragma solidity 0.8.19;
 
 // System params
 contract Params {
+    // The enlarge enlarge multiples for the accRewardsPerStake
+    uint internal constant COEFFICIENT = 1e18;
+    // engine caller, hex data of string NeroEngine
+    address private constant engineCaller =
+        address(0x000000000000000000004e65726F456e67696e65);
     // max active validators
     uint8 public constant MaxValidators = 21;
 
@@ -21,8 +26,8 @@ contract Params {
     uint256 public constant LazyPunishThreshold = 48; // accumulate amount of missing blocks for a validator to be punished
     uint256 public constant DecreaseRate = 2; // the allowable amount of missing blocks in one epoch for each validator
 
-    modifier onlyMiner() {
-        require(msg.sender == block.coinbase, "E40");
+    modifier onlyEngine() {
+        require(msg.sender == engineCaller, "E40");
         _;
     }
 
