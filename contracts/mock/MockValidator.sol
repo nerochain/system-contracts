@@ -64,9 +64,6 @@ contract Validator is WithAdmin, IValidator {
         return (RankingOp.Noop, 0);
     }
 
-    function receiveFee() external override payable onlyOwner {
-    }
-
     function validatorClaimAny(address payable ) external override payable onlyOwner returns (uint256 _stakeGWei) {
 
         return 0;

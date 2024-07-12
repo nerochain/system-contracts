@@ -20,9 +20,6 @@ interface IValidator {
     // @return amount of stakes need to be subtracted from total stakes.
     function exitStaking() external payable returns (RankingOp, uint256);
 
-    // validator receive fee rewards
-    function receiveFee() external payable;
-
     // @dev validatorClaimAny will sends any rewards to the manager,
     //  and returns an amount of ethers that the Staking contract should send back to the manager.
     // @return an amount of ethers that the Staking contract should send back to the manager.

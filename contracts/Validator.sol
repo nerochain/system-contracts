@@ -53,8 +53,6 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     uint256 public selfSettledRewards;
     uint256 public selfDebt; // debt for the calculation of inner staking rewards
 
-    uint256 public currFeeRewards;
-
     uint256 public exitLockEnd;
 
     // the block number that this validator was punished
@@ -167,10 +165,6 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         return (op, deltaStake);
     }
 
-    function receiveFee() external payable override onlyOwner {
-        currFeeRewards += msg.value;
-    }
-
     function validatorClaimAny(
         address payable _recipient
     ) external payable override onlyOwner returns (uint256 _stake) {
@@ -181,10 +175,9 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         selfDebt = accRewardsPerStake * selfStake;
         selfSettledRewards = 0;
 
-        // rewards = stakingRewards + commission + feeRewards
-        uint rewards = stakingRewards + currCommission + currFeeRewards;
+        // rewards = stakingRewards + commission
+        uint rewards = stakingRewards + currCommission;
         currCommission = 0;
-        currFeeRewards = 0;
         if (rewards > 0) {
             sendValue(_recipient, rewards);
             emit RewardsWithdrawn(validator, _recipient, rewards);
@@ -346,7 +339,7 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         }
     }
 
-    function canDoStaking() private view returns (bool) {
+    function canDoStaking() public view returns (bool) {
         return
             state == State.Idle ||
             state == State.Ready ||
@@ -516,7 +509,7 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         if (_stakeOwner == admin) {
             uint expectedCommission = currCommission + (_unsettledRewards - rps * totalStake);
             claimable = expectedAccRPS * selfStake + selfSettledRewards - selfDebt;
-            claimable = claimable + expectedCommission + currFeeRewards;
+            claimable = claimable + expectedCommission;
         } else {
             Delegation memory dlg = delegators[_stakeOwner];
             claimable = expectedAccRPS * dlg.stake + dlg.settled - dlg.debt;
@@ -555,7 +548,7 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     function validatorClaimable(uint _expectedCommission, uint _expectedAccRPS) private view returns (uint) {
         // the rewards was enlarged by COEFFICIENT times
         uint claimable = _expectedAccRPS * selfStake + selfSettledRewards - selfDebt;
-        claimable = claimable + _expectedCommission + currFeeRewards;
+        claimable = claimable + _expectedCommission;
         // actual rewards in wei
         claimable = claimable / COEFFICIENT;
         uint stake = 0;
