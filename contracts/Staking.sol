@@ -20,8 +20,8 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     // ValidatorInfo records necessary information about a validator
     struct ValidatorInfo {
         uint stake; //
-        uint debt; // debt for the calculation of staking rewards
-        uint incomeFees;
+        uint debt; // debt for the calculation of staking rewards, enlarged by COEFFICIENT times
+        uint incomeFees; // wei
         uint unWithdrawn; // total un-withdrawn stakes, in case the validator need to be punished, the punish amount will calculate according to this.
     }
 
@@ -64,7 +64,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     // staking rewards relative fields
     uint256 public totalStake; // Total stakes.
     uint256 public rewardsPerBlock; // wei
-    uint256 public accRewardsPerStake; // accumulative rewards per stake
+    uint256 public accRewardsPerStake; // accumulative rewards per stake, enlarged by COEFFICIENT times
     uint256 public lastUpdateAccBlock; // block number of last updates to the accRewardsPerStake
     uint256 public totalStakingRewards; // amount of total staking rewards.
 
@@ -583,18 +583,18 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     function updateRewardsRecord() private {
         uint deltaBlock = block.number - lastUpdateAccBlock;
         if (deltaBlock > 0) {
-            accRewardsPerStake += (rewardsPerBlock * deltaBlock) / totalStake;
+            accRewardsPerStake += (rewardsPerBlock * COEFFICIENT * deltaBlock) / totalStake;
             lastUpdateAccBlock = block.number;
         }
     }
 
     // @dev calcValidatorRewards first updateRewardsRecord, and then calculates the validator's settled rewards
-    // @return rewards need to settle
+    // @return rewards need to settle, in wei
     function calcValidatorRewards(address _val) private returns (uint256) {
         updateRewardsRecord();
         ValidatorInfo memory vInfo = valInfos[_val];
         // settle rewards of the validator
-        uint settledRewards = accRewardsPerStake * vInfo.stake - vInfo.debt;
+        uint settledRewards = (accRewardsPerStake * vInfo.stake - vInfo.debt) / COEFFICIENT;
         settledRewards = checkStakingRewards(settledRewards);
         return settledRewards + vInfo.incomeFees;
     }
@@ -709,11 +709,12 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         uint deltaBlock = block.number - lastUpdateAccBlock;
         uint expectedAccRPS = accRewardsPerStake;
         if (deltaBlock > 0) {
-            expectedAccRPS += (rewardsPerBlock * deltaBlock) / totalStake;
+            expectedAccRPS += (rewardsPerBlock * COEFFICIENT * deltaBlock) / totalStake;
         }
         ValidatorInfo memory vInfo = valInfos[_val];
         // settle rewards of the validator
         uint unsettledRewards = expectedAccRPS * vInfo.stake - vInfo.debt;
+        unsettledRewards /= COEFFICIENT;
         if (unsettledRewards > totalStakingRewards) {
             unsettledRewards = totalStakingRewards;
         }
@@ -750,7 +751,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     function simulateUpdateRewardsRecord() public view returns (uint256) {
         uint deltaBlock = block.number - lastUpdateAccBlock;
         if (deltaBlock > 0) {
-            return accRewardsPerStake + (rewardsPerBlock * deltaBlock) / totalStake;
+            return accRewardsPerStake + (rewardsPerBlock * COEFFICIENT * deltaBlock) / totalStake;
         }
         return accRewardsPerStake;
     }

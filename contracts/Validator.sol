@@ -21,8 +21,8 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     struct Delegation {
         bool exists; // indicates whether the delegator already exist
         uint stake; // 
-        uint settled; // settled rewards
-        uint debt; // debt for the calculation of staking rewards, wei
+        uint settled; // settled rewards, enlarged by COEFFICIENT times
+        uint debt; // debt for the calculation of staking rewards, enlarged by COEFFICIENT times
         uint punishFree; // factor that this delegator free to be punished. For a new delegator or a delegator that already punished, this value will equal to accPunishFactor.
     }
 
@@ -177,6 +177,7 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
 
         // rewards = stakingRewards + commission
         uint rewards = stakingRewards + currCommission;
+        rewards /= COEFFICIENT;
         currCommission = 0;
         if (rewards > 0) {
             sendValue(_recipient, rewards);
@@ -263,6 +264,7 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
 
         // staking rewards
         uint stakingRewards = accRewardsPerStake * dlg.stake + dlg.settled - dlg.debt;
+        stakingRewards /= COEFFICIENT;
         // reset something
         dlg.debt = accRewardsPerStake * dlg.stake;
         dlg.settled = 0;
@@ -470,20 +472,11 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     }
 
     function anyClaimable(uint _unsettledRewards, address _stakeOwner) external view override onlyOwner returns (uint) {
-        uint expectedAccRPS = accRewardsPerStake;
-        uint rps = 0;
-        if (totalStake > 0) {
-            // calculates _unsettledRewards
-            uint usRewards = _unsettledRewards * COEFFICIENT;
-            uint c = (usRewards * commissionRate) / 100;
-            uint newRewards = usRewards - c;
-            // expected accRewardsPerStake
-            rps = newRewards / totalStake;
-            expectedAccRPS = expectedAccRPS + rps;
-        }
+        uint rps = calcDeltaRPS(_unsettledRewards);
+        uint expectedAccRPS = accRewardsPerStake + rps;
 
         if (_stakeOwner == admin) {
-            uint expectedCommission = currCommission + (_unsettledRewards - (rps * totalStake));
+            uint expectedCommission = currCommission + (_unsettledRewards * COEFFICIENT - (rps * totalStake));
             return validatorClaimable(expectedCommission, expectedAccRPS);
         } else {
             return delegatorClaimable(expectedAccRPS, _stakeOwner);
@@ -494,27 +487,32 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         uint _unsettledRewards,
         address _stakeOwner
     ) external view override onlyOwner returns (uint) {
-        uint expectedAccRPS = accRewardsPerStake;
-        uint rps = 0;
-        if (totalStake > 0) {
-            // calculates _unsettledRewards
-            uint c = (_unsettledRewards * commissionRate) / 100;
-            uint newRewards = _unsettledRewards - c;
-            // expected accRewardsPerStake
-            rps = newRewards / totalStake;
-            expectedAccRPS = expectedAccRPS + rps;
-        }
+        uint rps = calcDeltaRPS(_unsettledRewards);
+        uint expectedAccRPS = accRewardsPerStake + rps;
 
         uint claimable = 0;
         if (_stakeOwner == admin) {
-            uint expectedCommission = currCommission + (_unsettledRewards - rps * totalStake);
+            uint expectedCommission = currCommission + (_unsettledRewards * COEFFICIENT - rps * totalStake);
             claimable = expectedAccRPS * selfStake + selfSettledRewards - selfDebt;
             claimable = claimable + expectedCommission;
         } else {
             Delegation memory dlg = delegators[_stakeOwner];
             claimable = expectedAccRPS * dlg.stake + dlg.settled - dlg.debt;
         }
-        return claimable;
+        return claimable / COEFFICIENT;
+    }
+
+    function calcDeltaRPS(uint _unsettledRewards) private view returns (uint) {
+        uint rps = 0;
+        if (totalStake > 0) {
+            // calculates _unsettledRewards
+            uint usRewards = _unsettledRewards * COEFFICIENT;
+            uint c = (usRewards * commissionRate) / 100;
+            uint newRewards = usRewards - c;
+            // expected accRewardsPerStake
+            rps = newRewards / totalStake;
+        }
+        return rps;
     }
 
     function punish(uint _factor) external payable override onlyOwner {
