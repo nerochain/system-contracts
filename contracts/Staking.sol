@@ -45,8 +45,6 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         DecreaseMissingBlockCounter
     }
 
-    uint256 public constant ValidatorFeePercent = 80; // 80%
-
     bool public isOpened; // true means any one can register to be a validator without permission. default: false
 
     uint256 public basicLockEnd; // End of the locking timestamp for the funding validators.
@@ -78,8 +76,6 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     mapping(uint => bool) public currRewardsPerBlockUpdated; // block.number => bool
     mapping(uint => bool) public feeDistributed;
     mapping(uint => bool) public validatorsUpdated;
-
-    address payable public communityPool;
 
     mapping(address => LazyPunishRecord) lazyPunishRecords;
     address[] public lazyPunishedValidators;
@@ -150,8 +146,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         uint256 _totalRewards,
         uint256 _rewardsPerBlock,
         uint256 _epoch,
-        uint256 _ruEpoch,
-        address payable _communityPool
+        uint256 _ruEpoch
     )
         external
         payable
@@ -172,8 +167,6 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         currRewardsPerBlock = _rewardsPerBlock;
         blockEpoch = _epoch;
         rewardsUpdateEpoch = _ruEpoch;
-
-        communityPool = _communityPool;
     }
 
     // @param _stakes, the staking amount in wei.
@@ -287,13 +280,15 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     {
         if (msg.value > 0) {
             uint cnt = activeValidators.length;
-            uint feePerValidator = (msg.value * ValidatorFeePercent) / 100 / cnt;
-            uint cpFee = msg.value - (feePerValidator * cnt);
-            for (uint i = 0; i < cnt; i++) {
+            uint feePerValidator = msg.value / cnt;
+            uint remainder = msg.value - (feePerValidator * cnt);
+            ValidatorInfo storage vInfo = valInfos[activeValidators[0]];
+            vInfo.incomeFees += feePerValidator + remainder;
+            for (uint i = 1; i < cnt; i++) {
                 IValidator val = valMaps[activeValidators[i]];
-                val.receiveFee{value: feePerValidator}();
+                ValidatorInfo storage vInfo = valInfos[activeValidators[i]];
+                vInfo.incomeFees += feePerValidator;
             }
-            sendValue(communityPool, cpFee);
         }
     }
 
