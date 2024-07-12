@@ -63,19 +63,14 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
 
     // staking rewards relative fields
     uint256 public totalStake; // Total stakes.
-    uint256 public currRewardsPerBlock; // wei
+    uint256 public rewardsPerBlock; // wei
     uint256 public accRewardsPerStake; // accumulative rewards per stake
     uint256 public lastUpdateAccBlock; // block number of last updates to the accRewardsPerStake
-    uint256 public totalStakingRewards; // amount of totalStakingRewards, not including bonus.
+    uint256 public totalStakingRewards; // amount of total staking rewards.
 
     // necessary restriction for the miner to update some consensus relative value
-    uint public rewardsUpdateEpoch; // set on initialize, update the currRewardsPerBlock once per rewardsUpdateEpoch (considering 3 sec per block)
     uint public blockEpoch; //set on initialize,
     mapping(uint256 => mapping(Operation => bool)) operationsDone;
-
-    mapping(uint => bool) public currRewardsPerBlockUpdated; // block.number => bool
-    mapping(uint => bool) public feeDistributed;
-    mapping(uint => bool) public validatorsUpdated;
 
     mapping(address => LazyPunishRecord) lazyPunishRecords;
     address[] public lazyPunishedValidators;
@@ -145,8 +140,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         uint256 _releaseCnt,
         uint256 _totalRewards,
         uint256 _rewardsPerBlock,
-        uint256 _epoch,
-        uint256 _ruEpoch
+        uint256 _epoch
     )
         external
         payable
@@ -157,16 +151,15 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         require(_admin != address(0), "E09");
         require((_releasePeriod != 0 && _releaseCnt != 0) || (_releasePeriod == 0 && _releaseCnt == 0), "E10");
         require(address(this).balance > _totalRewards, "E11");
-        require(_epoch > 0 && _ruEpoch > 0, "E12");
+        require(_epoch > 0, "E12");
         //        require(_rewardsPerBlock > 0, ""); // don't need to restrict
         admin = _admin;
         basicLockEnd = block.timestamp + _firstLockPeriod;
         releasePeriod = _releasePeriod;
         releaseCount = _releaseCnt;
         totalStakingRewards = _totalRewards;
-        currRewardsPerBlock = _rewardsPerBlock;
+        rewardsPerBlock = _rewardsPerBlock;
         blockEpoch = _epoch;
-        rewardsUpdateEpoch = _ruEpoch;
     }
 
     // @param _stakes, the staking amount in wei.
@@ -251,24 +244,6 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         activeValidators = newSet;
     }
 
-    // updateRewardsInfo updates currRewardsPerBlock once per RewardsUpdateEpoch
-    function updateRewardsInfo(
-        uint256 _rewardsPerBlock
-    )
-        external
-        // #if Mainnet
-        onlyEngine
-        // #endif
-        onlyOperateOnce(Operation.UpdateRewardsPerBlock)
-    {
-        // only RewardsUpdateEpoch block
-        require(block.number % rewardsUpdateEpoch == 0, "E19");
-        if (currRewardsPerBlock != _rewardsPerBlock) {
-            updateRewardsRecord();
-            currRewardsPerBlock = _rewardsPerBlock;
-        }
-    }
-
     // distributeBlockFee distributes block fees to all active validators
     function distributeBlockFee()
         external
@@ -282,10 +257,9 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
             uint cnt = activeValidators.length;
             uint feePerValidator = msg.value / cnt;
             uint remainder = msg.value - (feePerValidator * cnt);
-            ValidatorInfo storage vInfo = valInfos[activeValidators[0]];
-            vInfo.incomeFees += feePerValidator + remainder;
+            ValidatorInfo storage aInfo = valInfos[activeValidators[0]];
+            aInfo.incomeFees += feePerValidator + remainder;
             for (uint i = 1; i < cnt; i++) {
-                IValidator val = valMaps[activeValidators[i]];
                 ValidatorInfo storage vInfo = valInfos[activeValidators[i]];
                 vInfo.incomeFees += feePerValidator;
             }
@@ -604,12 +578,12 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         return eth;
     }
 
-    // @dev updateRewardsRecord updates the accRewardsPerStake += (currRewardsPerBlock * deltaBlock)/totalStake
+    // @dev updateRewardsRecord updates the accRewardsPerStake += (rewardsPerBlock * deltaBlock)/totalStake
     // and set the lastUpdateAccBlock to current block number.
     function updateRewardsRecord() private {
         uint deltaBlock = block.number - lastUpdateAccBlock;
         if (deltaBlock > 0) {
-            accRewardsPerStake += (currRewardsPerBlock * deltaBlock) / totalStake;
+            accRewardsPerStake += (rewardsPerBlock * deltaBlock) / totalStake;
             lastUpdateAccBlock = block.number;
         }
     }
@@ -735,7 +709,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         uint deltaBlock = block.number - lastUpdateAccBlock;
         uint expectedAccRPS = accRewardsPerStake;
         if (deltaBlock > 0) {
-            expectedAccRPS += (currRewardsPerBlock * deltaBlock) / totalStake;
+            expectedAccRPS += (rewardsPerBlock * deltaBlock) / totalStake;
         }
         ValidatorInfo memory vInfo = valInfos[_val];
         // settle rewards of the validator
@@ -776,7 +750,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     function simulateUpdateRewardsRecord() public view returns (uint256) {
         uint deltaBlock = block.number - lastUpdateAccBlock;
         if (deltaBlock > 0) {
-            return accRewardsPerStake + (currRewardsPerBlock * deltaBlock) / totalStake;
+            return accRewardsPerStake + (rewardsPerBlock * deltaBlock) / totalStake;
         }
         return accRewardsPerStake;
     }
