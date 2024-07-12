@@ -11,7 +11,6 @@ import "./interfaces/types.sol";
 import "./WithAdmin.sol";
 import "./library/SafeSend.sol";
 
-
 /**
 About punish:
     When the validator was punished, all delegator will also be punished,
@@ -21,9 +20,9 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     // Delegation records all information about a delegation
     struct Delegation {
         bool exists; // indicates whether the delegator already exist
-        uint stakeGWei; // in gwei
+        uint stake; // 
         uint settled; // settled rewards
-        uint debt;  // debt for the calculation of staking rewards, wei
+        uint debt; // debt for the calculation of staking rewards, wei
         uint punishFree; // factor that this delegator free to be punished. For a new delegator or a delegator that already punished, this value will equal to accPunishFactor.
     }
 
@@ -35,23 +34,24 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     struct UnboundRecord {
         uint count; // total pending unbound number;
         uint startIdx; // start index of the first pending record. unless the count is zero, otherwise the startIdx will only just increase.
-        uint pendingAmount; // total pending stakes, gwei
+        uint pendingAmount; // total pending stakes
         mapping(uint => PendingUnbound) pending;
     }
 
-    address public owner;   // It must be the Staking contract address. For convenient.
+    address public owner; // It must be the Staking contract address. For convenient.
     address public override validator; // the address that represents a validator and will be used to take part in the consensus.
     uint256 public commissionRate; // base 100
-    uint256 public selfStakeGWei; // self stake, in GWei
-    uint256 public override totalStake; // total stakes in GWei, = selfStake + allOtherDelegation
+    uint256 public selfStake; // self stake
+    uint256 public override totalStake; // total stakes = selfStake + allOtherDelegation
     bool public acceptDelegation; // Does this validator accepts delegation
     State public override state;
     uint256 public totalUnWithdrawn;
 
+    // these values are all enlarged by COEFFICIENT times.
     uint256 public currCommission; // current withdraw-able commission
-    uint256 public accRewardsPerStake; // accumulative rewards per stake, in wei.
-    uint256 private selfSettledRewards;
-    uint256 private selfDebt; // debt for the calculation of inner staking rewards, wei
+    uint256 public accRewardsPerStake; // accumulative rewards per stake
+    uint256 public selfSettledRewards;
+    uint256 public selfDebt; // debt for the calculation of inner staking rewards
 
     uint256 public currFeeRewards;
 
@@ -89,57 +89,61 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     }
 
     // @param _stake, the staking amount of ether
-    constructor(address _validator, address _manager, uint _rate, uint _stake, bool _acceptDlg, State _state)
-    onlyValidAddress(_validator)
-    onlyValidAddress(_manager)
-    onlyValidRate(_rate) {
+    constructor(
+        address _validator,
+        address _manager,
+        uint _rate,
+        uint _stake,
+        bool _acceptDlg,
+        State _state
+    ) onlyValidAddress(_validator) onlyValidAddress(_manager) onlyValidRate(_rate) {
         require(_stake <= MaxStakes, "E29");
         owner = msg.sender;
         validator = _validator;
         admin = _manager;
         commissionRate = _rate;
-        selfStakeGWei = _stake;
+        selfStake = _stake;
         totalStake = _stake;
         totalUnWithdrawn = _stake;
         acceptDelegation = _acceptDlg;
         state = _state;
     }
 
-    function manager() external override view returns (address) {
+    function manager() external view override returns (address) {
         return admin;
     }
 
     // @notice The founder locking rule is handled by Staking contract, not in here.
     // @return an operation enum about the ranking
-    function addStake(uint256 _stakeGWei) external override payable onlyOwner onlyCanDoStaking returns (RankingOp) {
+    function addStake(uint256 _stake) external payable override onlyOwner onlyCanDoStaking returns (RankingOp) {
         // total stakes hit max limit
-        require(totalStake + _stakeGWei <= MaxStakes, "E29");
+        require(totalStake + _stake <= MaxStakes, "E29");
 
         handleReceivedRewards();
         // update stakes and innerDebt
-        selfDebt += _stakeGWei * accRewardsPerStake;
-        selfStakeGWei += _stakeGWei;
-        return addTotalStake(_stakeGWei, admin);
+        selfDebt += _stake * accRewardsPerStake;
+        selfStake += _stake;
+        return addTotalStake(_stake, admin);
     }
 
     // @notice The founder locking rule is handled by Staking contract, not in here.
     // @return an operation enum about the ranking
-    function subStake(uint256 _stakeGWei) external override payable onlyOwner onlyCanDoStaking returns (RankingOp){
+    function subStake(uint256 _stake) external payable override onlyOwner onlyCanDoStaking returns (RankingOp) {
         // Break minSelfStakes limit, try exitStaking
-        require(selfStakeGWei >= _stakeGWei + MinSelfStakes, "E31");
+        require(selfStake >= _stake + MinSelfStakes, "E31");
 
         handleReceivedRewards();
         //
-        selfSettledRewards += _stakeGWei * accRewardsPerStake;
-        selfStakeGWei -= _stakeGWei;
-        RankingOp op = subTotalStake(_stakeGWei, admin);
+        selfSettledRewards += _stake * accRewardsPerStake;
+        selfStake -= _stake;
+        RankingOp op = subTotalStake(_stake, admin);
 
         // pending unbound stake, use `validator` as the stakeOwner, because the manager can be changed.
-        addUnboundRecord(validator, _stakeGWei);
+        addUnboundRecord(validator, _stake);
         return op;
     }
 
-    function exitStaking() external override payable onlyOwner returns (RankingOp, uint256) {
+    function exitStaking() external payable override onlyOwner returns (RankingOp, uint256) {
         // already on the exit state
         require(state != State.Exit, "E32");
         State oldSt = state;
@@ -153,26 +157,28 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
             op = RankingOp.Remove;
         }
         // subtract the selfStake from totalStake, settle rewards, and add unbound record.
-        selfSettledRewards += selfStakeGWei * accRewardsPerStake;
-        totalStake -= selfStakeGWei;
-        addUnboundRecord(validator, selfStakeGWei);
-        uint deltaStake = selfStakeGWei;
-        selfStakeGWei = 0;
+        selfSettledRewards += selfStake * accRewardsPerStake;
+        totalStake -= selfStake;
+        addUnboundRecord(validator, selfStake);
+        uint deltaStake = selfStake;
+        selfStake = 0;
 
         emit StateChanged(validator, admin, oldSt, State.Exit);
         return (op, deltaStake);
     }
 
-    function receiveFee() external override payable onlyOwner {
+    function receiveFee() external payable override onlyOwner {
         currFeeRewards += msg.value;
     }
 
-    function validatorClaimAny(address payable _recipient) external override payable onlyOwner returns (uint256 _stakeGWei) {
+    function validatorClaimAny(
+        address payable _recipient
+    ) external payable override onlyOwner returns (uint256 _stake) {
         handleReceivedRewards();
         // staking rewards
-        uint stakingRewards = accRewardsPerStake * selfStakeGWei + selfSettledRewards - selfDebt;
+        uint stakingRewards = accRewardsPerStake * selfStake + selfSettledRewards - selfDebt;
         // reset something
-        selfDebt = accRewardsPerStake * selfStakeGWei;
+        selfDebt = accRewardsPerStake * selfStake;
         selfSettledRewards = 0;
 
         // rewards = stakingRewards + commission + feeRewards
@@ -186,16 +192,19 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
 
         // calculates withdraw-able stakes
         uint unboundAmount = processClaimableUnbound(validator);
-        _stakeGWei += unboundAmount;
+        _stake += unboundAmount;
 
-        totalUnWithdrawn -= _stakeGWei;
-        return _stakeGWei;
+        totalUnWithdrawn -= _stake;
+        return _stake;
     }
 
-    function addDelegation(uint256 _stakeGWei, address _delegator) external override payable onlyOwner onlyCanDoStaking returns (RankingOp){
+    function addDelegation(
+        uint256 _stake,
+        address _delegator
+    ) external payable override onlyOwner onlyCanDoStaking returns (RankingOp) {
         // validator do not accept delegation
         require(acceptDelegation, "E33");
-        require(totalStake + _stakeGWei <= MaxStakes, "E29");
+        require(totalStake + _stake <= MaxStakes, "E29");
         // if the delegator is new, add it to the array
         if (delegators[_delegator].exists == false) {
             delegators[_delegator].exists = true;
@@ -207,55 +216,62 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         handleReceivedRewards();
         Delegation storage dlg = delegators[_delegator];
         // update stakes and debt
-        dlg.debt += _stakeGWei * accRewardsPerStake;
-        dlg.stakeGWei += _stakeGWei;
-        return addTotalStake(_stakeGWei, _delegator);
+        dlg.debt += _stake * accRewardsPerStake;
+        dlg.stake += _stake;
+        return addTotalStake(_stake, _delegator);
     }
 
-    function subDelegation(uint256 _stakeGWei, address _delegator) external override payable onlyOwner onlyCanDoStaking returns (RankingOp){
+    function subDelegation(
+        uint256 _stake,
+        address _delegator
+    ) external payable override onlyOwner onlyCanDoStaking returns (RankingOp) {
         handleDelegatorPunishment(_delegator);
-        return innerSubDelegation(_stakeGWei, _delegator);
+        return innerSubDelegation(_stake, _delegator);
     }
 
-    function exitDelegation(address _delegator) external override payable onlyOwner onlyCanDoStaking returns (RankingOp, uint){
+    function exitDelegation(
+        address _delegator
+    ) external payable override onlyOwner onlyCanDoStaking returns (RankingOp, uint) {
         Delegation memory dlg = delegators[_delegator];
         // no delegation
-        require(dlg.stakeGWei > 0, "E34");
+        require(dlg.stake > 0, "E34");
 
         handleDelegatorPunishment(_delegator);
 
-        uint oldStake = dlg.stakeGWei;
+        uint oldStake = dlg.stake;
         RankingOp op = innerSubDelegation(oldStake, _delegator);
         return (op, oldStake);
     }
 
-    function innerSubDelegation(uint256 _stakeGWei, address _delegator) private returns (RankingOp) {
+    function innerSubDelegation(uint256 _stake, address _delegator) private returns (RankingOp) {
         Delegation storage dlg = delegators[_delegator];
         // no enough stake to subtract
-        require(dlg.stakeGWei >= _stakeGWei, "E24");
+        require(dlg.stake >= _stake, "E24");
 
         handleReceivedRewards();
         //
-        dlg.settled += _stakeGWei * accRewardsPerStake;
-        dlg.stakeGWei -= _stakeGWei;
+        dlg.settled += _stake * accRewardsPerStake;
+        dlg.stake -= _stake;
 
-        addUnboundRecord(_delegator, _stakeGWei);
+        addUnboundRecord(_delegator, _stake);
 
-        RankingOp op = subTotalStake(_stakeGWei, _delegator);
+        RankingOp op = subTotalStake(_stake, _delegator);
 
         return op;
     }
 
-    function delegatorClaimAny(address payable _delegator) external override payable onlyOwner returns (uint256 _stakeGWei, uint256 _forceUnbound) {
+    function delegatorClaimAny(
+        address payable _delegator
+    ) external payable override onlyOwner returns (uint256 _stake, uint256 _forceUnbound) {
         handleDelegatorPunishment(_delegator);
 
         handleReceivedRewards();
         Delegation storage dlg = delegators[_delegator];
 
         // staking rewards
-        uint stakingRewards = accRewardsPerStake * dlg.stakeGWei + dlg.settled - dlg.debt;
+        uint stakingRewards = accRewardsPerStake * dlg.stake + dlg.settled - dlg.debt;
         // reset something
-        dlg.debt = accRewardsPerStake * dlg.stakeGWei;
+        dlg.debt = accRewardsPerStake * dlg.stake;
         dlg.settled = 0;
 
         if (stakingRewards > 0) {
@@ -265,18 +281,18 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
 
         // calculates withdraw-able stakes
         uint unboundAmount = processClaimableUnbound(_delegator);
-        _stakeGWei += unboundAmount;
+        _stake += unboundAmount;
 
         if (state == State.Exit && exitLockEnd <= block.timestamp) {
-            _stakeGWei += dlg.stakeGWei;
-            totalStake -= dlg.stakeGWei;
-            _forceUnbound = dlg.stakeGWei;
-            dlg.stakeGWei = 0;
+            _stake += dlg.stake;
+            totalStake -= dlg.stake;
+            _forceUnbound = dlg.stake;
+            dlg.stake = 0;
             // notice: must clear debt
             dlg.debt = 0;
         }
-        totalUnWithdrawn -= _stakeGWei;
-        return (_stakeGWei, _forceUnbound);
+        totalUnWithdrawn -= _stake;
+        return (_stake, _forceUnbound);
     }
 
     function handleDelegatorPunishment(address _delegator) private {
@@ -286,11 +302,11 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         dlg.punishFree = accPunishFactor;
         if (amount > 0) {
             // first try slashing from staking, and then from pendingUnbound.
-            if (dlg.stakeGWei >= amount) {
-                dlg.stakeGWei -= amount;
+            if (dlg.stake >= amount) {
+                dlg.stake -= amount;
             } else {
-                uint restAmount = amount - dlg.stakeGWei;
-                dlg.stakeGWei = 0;
+                uint restAmount = amount - dlg.stake;
+                dlg.stake = 0;
                 slashFromUnbound(_delegator, restAmount);
             }
         }
@@ -308,10 +324,10 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         uint deltaFactor = accPunishFactor - dlg.punishFree;
         uint amount = 0;
         uint pendingAmount = unboundRecords[_delegator].pendingAmount;
-        if (dlg.stakeGWei > 0 || pendingAmount > 0) {
+        if (dlg.stake > 0 || pendingAmount > 0) {
             // total stake
-            uint totalDelegation = dlg.stakeGWei + pendingAmount;
-            amount = totalDelegation * deltaFactor / PunishBase;
+            uint totalDelegation = dlg.stake + pendingAmount;
+            amount = (totalDelegation * deltaFactor) / PunishBase;
         }
         return amount;
     }
@@ -320,25 +336,29 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         // take commission and update rewards record
         if (msg.value > 0) {
             require(totalStake > 0, "E35");
-            uint c = msg.value * commissionRate / 100;
-            uint newRewards = msg.value - c;
+            uint rewards = msg.value * COEFFICIENT; // enlarge the rewards
+            uint c = (rewards * commissionRate) / 100;
+            uint newRewards = rewards - c;
             // update accRewardsPerStake
             uint rps = newRewards / totalStake;
             accRewardsPerStake += rps;
-            currCommission += msg.value - (rps * totalStake);
+            currCommission += rewards - (rps * totalStake);
         }
     }
 
     function canDoStaking() private view returns (bool) {
-        return state == State.Idle || state == State.Ready || (state == State.Jail && block.number - punishBlk > JailPeriod);
+        return
+            state == State.Idle ||
+            state == State.Ready ||
+            (state == State.Jail && block.number - punishBlk > JailPeriod);
     }
 
     // @dev add a new unbound record for user
-    function addUnboundRecord(address _owner, uint _stakeGWei) private {
+    function addUnboundRecord(address _owner, uint _stake) private {
         UnboundRecord storage rec = unboundRecords[_owner];
-        rec.pending[rec.count] = PendingUnbound(_stakeGWei, block.timestamp + UnboundLockPeriod);
+        rec.pending[rec.count] = PendingUnbound(_stake, block.timestamp + UnboundLockPeriod);
         rec.count++;
-        rec.pendingAmount += _stakeGWei;
+        rec.pendingAmount += _stake;
     }
 
     function processClaimableUnbound(address _owner) private returns (uint) {
@@ -400,14 +420,14 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         }
     }
 
-    function addTotalStake(uint _stakeGWei, address _changer) private returns (RankingOp) {
-        totalStake += _stakeGWei;
-        totalUnWithdrawn += _stakeGWei;
+    function addTotalStake(uint _stake, address _changer) private returns (RankingOp) {
+        totalStake += _stake;
+        totalUnWithdrawn += _stake;
 
         // 1. Idle => Idle, Noop
         RankingOp op = RankingOp.Noop;
         // 2. Idle => Ready, or Jail => Ready, or Ready => Ready, Up
-        if (totalStake >= ThresholdStakes && selfStakeGWei >= MinSelfStakes) {
+        if (totalStake >= ThresholdStakes && selfStake >= MinSelfStakes) {
             if (state != State.Ready) {
                 emit StateChanged(validator, _changer, state, State.Ready);
                 state = State.Ready;
@@ -424,8 +444,8 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         return op;
     }
 
-    function subTotalStake(uint _stakeGWei, address _changer) private returns (RankingOp) {
-        totalStake -= _stakeGWei;
+    function subTotalStake(uint _stake, address _changer) private returns (RankingOp) {
+        totalStake -= _stake;
 
         // 1. Idle => Idle, Noop
         RankingOp op = RankingOp.Noop;
@@ -441,9 +461,9 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         }
         // 3. Jail => Idle, Noop; Jail => Ready, Up.
         if (state == State.Jail) {
-            // We also need to check whether the selfStakeGWei is less than MinSelfStakes or not.
+            // We also need to check whether the selfStake is less than MinSelfStakes or not.
             // It may happen due to stakes slashing.
-            if (totalStake < ThresholdStakes || selfStakeGWei < MinSelfStakes) {
+            if (totalStake < ThresholdStakes || selfStake < MinSelfStakes) {
                 emit StateChanged(validator, _changer, state, State.Idle);
                 state = State.Idle;
             } else {
@@ -456,13 +476,14 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         return op;
     }
 
-    function anyClaimable(uint _unsettledRewards, address _stakeOwner) external override view onlyOwner returns (uint) {
+    function anyClaimable(uint _unsettledRewards, address _stakeOwner) external view override onlyOwner returns (uint) {
         uint expectedAccRPS = accRewardsPerStake;
         uint rps = 0;
         if (totalStake > 0) {
             // calculates _unsettledRewards
-            uint c = _unsettledRewards * commissionRate / 100;
-            uint newRewards = _unsettledRewards - c;
+            uint usRewards = _unsettledRewards * COEFFICIENT;
+            uint c = (usRewards * commissionRate) / 100;
+            uint newRewards = usRewards - c;
             // expected accRewardsPerStake
             rps = newRewards / totalStake;
             expectedAccRPS = expectedAccRPS + rps;
@@ -476,12 +497,15 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         }
     }
 
-    function claimableRewards(uint _unsettledRewards, address _stakeOwner) external override view onlyOwner returns (uint) {
+    function claimableRewards(
+        uint _unsettledRewards,
+        address _stakeOwner
+    ) external view override onlyOwner returns (uint) {
         uint expectedAccRPS = accRewardsPerStake;
         uint rps = 0;
         if (totalStake > 0) {
             // calculates _unsettledRewards
-            uint c = _unsettledRewards * commissionRate / 100;
+            uint c = (_unsettledRewards * commissionRate) / 100;
             uint newRewards = _unsettledRewards - c;
             // expected accRewardsPerStake
             rps = newRewards / totalStake;
@@ -491,11 +515,11 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         uint claimable = 0;
         if (_stakeOwner == admin) {
             uint expectedCommission = currCommission + (_unsettledRewards - rps * totalStake);
-            claimable = expectedAccRPS * selfStakeGWei + selfSettledRewards - selfDebt;
+            claimable = expectedAccRPS * selfStake + selfSettledRewards - selfDebt;
             claimable = claimable + expectedCommission + currFeeRewards;
         } else {
             Delegation memory dlg = delegators[_stakeOwner];
-            claimable = expectedAccRPS * dlg.stakeGWei + dlg.settled - dlg.debt;
+            claimable = expectedAccRPS * dlg.stake + dlg.settled - dlg.debt;
         }
         return claimable;
     }
@@ -503,19 +527,19 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     function punish(uint _factor) external payable override onlyOwner {
         handleReceivedRewards();
         // punish according to totalUnWithdrawn
-        uint slashAmount = totalUnWithdrawn * _factor / PunishBase;
+        uint slashAmount = (totalUnWithdrawn * _factor) / PunishBase;
         if (totalStake >= slashAmount) {
             totalStake -= slashAmount;
         } else {
             totalStake = 0;
         }
-        uint selfUnWithdrawn = selfStakeGWei + unboundRecords[validator].pendingAmount;
-        uint selfSlashAmount = selfUnWithdrawn * _factor / PunishBase;
-        if (selfStakeGWei >= selfSlashAmount) {
-            selfStakeGWei -= selfSlashAmount;
+        uint selfUnWithdrawn = selfStake + unboundRecords[validator].pendingAmount;
+        uint selfSlashAmount = (selfUnWithdrawn * _factor) / PunishBase;
+        if (selfStake >= selfSlashAmount) {
+            selfStake -= selfSlashAmount;
         } else {
-            uint fromPending = selfSlashAmount - selfStakeGWei;
-            selfStakeGWei = 0;
+            uint fromPending = selfSlashAmount - selfStake;
+            selfStake = 0;
             slashFromUnbound(validator, fromPending);
         }
         totalUnWithdrawn -= slashAmount;
@@ -529,19 +553,21 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     }
 
     function validatorClaimable(uint _expectedCommission, uint _expectedAccRPS) private view returns (uint) {
-        uint claimable = _expectedAccRPS * selfStakeGWei + selfSettledRewards - selfDebt;
+        // the rewards was enlarged by COEFFICIENT times
+        uint claimable = _expectedAccRPS * selfStake + selfSettledRewards - selfDebt;
         claimable = claimable + _expectedCommission + currFeeRewards;
-        uint stakeGWei = 0;
+        // actual rewards in wei
+        claimable = claimable / COEFFICIENT;
+        uint stake = 0;
         // calculates claimable stakes
         uint claimableUnbound = getClaimableUnbound(validator);
-        stakeGWei += claimableUnbound;
+        stake += claimableUnbound;
 
         if (state == State.Exit && exitLockEnd <= block.timestamp) {
-            stakeGWei += selfStakeGWei;
+            stake += selfStake;
         }
-        if (stakeGWei > 0) {
-            // gwei to wei
-            claimable += stakeGWei * 1 gwei;
+        if (stake > 0) {
+            claimable += stake;
         }
         return claimable;
     }
@@ -554,16 +580,18 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         uint slashAmountFromPending = 0;
         if (slashAmount > 0) {
             // first try slashing from staking, and then from pendingUnbound.
-            if (dlg.stakeGWei >= slashAmount) {
-                dlg.stakeGWei -= slashAmount;
+            if (dlg.stake >= slashAmount) {
+                dlg.stake -= slashAmount;
             } else {
-                slashAmountFromPending = slashAmount - dlg.stakeGWei;
-                dlg.stakeGWei = 0;
+                slashAmountFromPending = slashAmount - dlg.stake;
+                dlg.stake = 0;
             }
         }
         // staking rewards
-        uint claimable = _expectedAccRPS * dlg.stakeGWei + dlg.settled - dlg.debt;
-        uint stakeGWei = 0;
+        uint claimable = _expectedAccRPS * dlg.stake + dlg.settled - dlg.debt;
+        // actual rewards in wei
+        claimable = claimable / COEFFICIENT;
+        uint stake = 0;
         // calculates withdraw-able stakes
         uint claimableUnbound = getClaimableUnbound(_stakeOwner);
         if (slashAmountFromPending > 0) {
@@ -573,14 +601,13 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
                 claimableUnbound -= slashAmountFromPending;
             }
         }
-        stakeGWei += claimableUnbound;
+        stake += claimableUnbound;
 
         if (state == State.Exit && exitLockEnd <= block.timestamp) {
-            stakeGWei += dlg.stakeGWei;
+            stake += dlg.stake;
         }
-        if (stakeGWei > 0) {
-            // gwei to wei
-            claimable += stakeGWei * 1 gwei;
+        if (stake > 0) {
+            claimable += stake;
         }
         return claimable;
     }

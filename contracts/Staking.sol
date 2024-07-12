@@ -19,14 +19,15 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
 
     // ValidatorInfo records necessary information about a validator
     struct ValidatorInfo {
-        uint stakeGWei; // in gwei
-        uint debt; // debt for the calculation of staking rewards, wei
-        uint unWithdrawn; // total un-withdrawn stakes in gwei, in case the validator need to be punished, the punish amount will calculate according to this.
+        uint stake; //
+        uint debt; // debt for the calculation of staking rewards
+        uint incomeFees;
+        uint unWithdrawn; // total un-withdrawn stakes, in case the validator need to be punished, the punish amount will calculate according to this.
     }
 
     struct FounderLock {
-        uint initialStakeGWei; // total initial stakes, gwei
-        uint unboundStakeGWei; // total unbound stakes, gwei
+        uint initialStake; // total initial stakes
+        uint unboundStake; // total unbound stakes
         bool locking; // False means there will be no any locking rule (not a founder, or a founder is totally unlocked)
     }
 
@@ -63,9 +64,9 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     SortedLinkedList.List topValidators;
 
     // staking rewards relative fields
-    uint256 public totalStakeGWei; // Total stakes, gwei.
+    uint256 public totalStake; // Total stakes.
     uint256 public currRewardsPerBlock; // wei
-    uint256 public accRewardsPerStake; // accumulative rewards per stakeGWei
+    uint256 public accRewardsPerStake; // accumulative rewards per stake
     uint256 public lastUpdateAccBlock; // block number of last updates to the accRewardsPerStake
     uint256 public totalStakingRewards; // amount of totalStakingRewards, not including bonus.
 
@@ -96,10 +97,10 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         address indexed val,
         address indexed manager,
         uint256 commissionRate,
-        uint256 stakeGWei,
+        uint256 stake,
         State st
     );
-    event TotalStakeGWeiChanged(address indexed changer, uint oldStake, uint newStake);
+    event TotalStakeChanged(address indexed changer, uint oldStake, uint newStake);
     event FounderUnlocked(address indexed val);
     event StakingRewardsEmpty(bool empty);
     // emits when a user do a claim and with unbound stake be withdrawn.
@@ -175,12 +176,12 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         communityPool = _communityPool;
     }
 
-    // @param _stakes, the staking amount in ether.
+    // @param _stakes, the staking amount in wei.
     function initValidator(
         address _val,
         address _manager,
         uint _rate,
-        uint _stakeEth,
+        uint _stakes,
         bool _acceptDelegation
     ) external onlyInitialized onlyNotExists(_val) {
         // only on genesis block for the chain initialize code to execute
@@ -188,20 +189,19 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         require(block.number == 0, "E13");
         // #endif
         // invalid stake
-        require(_stakeEth > 0, "E14");
-        uint stakeGwei = ethToGwei(_stakeEth);
-        uint tempTotalStakeGWei = totalStakeGWei + stakeGwei;
-        uint recordBalance = gweiToWei(tempTotalStakeGWei) + totalStakingRewards;
+        require(_stakes > 0, "E14");
+        mustConvertStake(_stakes);
+        uint recordBalance = totalStake + _stakes + totalStakingRewards;
         // invalid initial params
         require(address(this).balance >= recordBalance, "E15");
         // create a funder validator with state of Ready
-        IValidator val = new Validator(_val, _manager, _rate, stakeGwei, _acceptDelegation, State.Ready);
+        IValidator val = new Validator(_val, _manager, _rate, _stakes, _acceptDelegation, State.Ready);
         allValidatorAddrs.push(_val);
         valMaps[_val] = val;
-        valInfos[_val] = ValidatorInfo(stakeGwei, 0, stakeGwei);
-        founders[_val] = FounderLock(stakeGwei, 0, true);
+        valInfos[_val] = ValidatorInfo(_stakes, 0, 0, _stakes);
+        founders[_val] = FounderLock(_stakes, 0, true);
 
-        totalStakeGWei += stakeGwei;
+        totalStake += _stakes;
 
         topValidators.improveRanking(val);
     }
@@ -392,18 +392,19 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         uint settledRewards = calcValidatorRewards(_val);
         // the slash amount will calculate from unWithdrawn stakes,
         // and then slash immediately, and first try subtracting the slash amount from staking record.
-        // If there's no enough stakeGWei, it means some of the slash amount will come from the pending unbound staking.
+        // If there's no enough stake, it means some of the slash amount will come from the pending unbound staking.
         ValidatorInfo storage vInfo = valInfos[_val];
         uint slashAmount = (vInfo.unWithdrawn * _factor) / PunishBase;
         uint amountFromCurrStakes = slashAmount;
-        if (vInfo.stakeGWei < slashAmount) {
-            amountFromCurrStakes = vInfo.stakeGWei;
+        if (vInfo.stake < slashAmount) {
+            amountFromCurrStakes = vInfo.stake;
         }
-        vInfo.stakeGWei -= amountFromCurrStakes;
-        vInfo.debt = vInfo.stakeGWei * accRewardsPerStake;
-        totalStakeGWei -= amountFromCurrStakes;
+        vInfo.stake -= amountFromCurrStakes;
+        vInfo.debt = vInfo.stake * accRewardsPerStake;
+        vInfo.incomeFees = 0;
+        totalStake -= amountFromCurrStakes;
         vInfo.unWithdrawn -= slashAmount;
-        emit TotalStakeGWeiChanged(_val, totalStakeGWei + amountFromCurrStakes, totalStakeGWei);
+        emit TotalStakeChanged(_val, totalStake + amountFromCurrStakes, totalStake);
 
         val.punish{value: settledRewards}(_factor);
         // remove from ranking immediately
@@ -421,40 +422,39 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         uint _rate,
         bool _acceptDelegation
     ) external payable onlyNotExists(_val) {
-        uint stakeEth = 0;
         if (msg.value > 0) {
-            stakeEth = mustConvertStake(msg.value);
+            mustConvertStake(msg.value);
         }
-        uint stakeGWei = ethToGwei(stakeEth);
+        uint stake = msg.value;
         if (isOpened) {
             // need minimal self stakes on permission-less stage
-            require(stakeGWei >= MinSelfStakes, "E20");
+            require(stake >= MinSelfStakes, "E20");
         } else {
             // admin only on permission stage
             require(msg.sender == admin, "E21");
         }
         // Default state is Idle, when the stakes >= ThresholdStakes, then the validator will be Ready immediately.
         State vState = State.Idle;
-        if (stakeGWei >= ThresholdStakes) {
+        if (stake >= ThresholdStakes) {
             vState = State.Ready;
         }
         // Create a validator with given info, and updates allValAddrs, valMaps, totalStake
-        IValidator val = new Validator(_val, _manager, _rate, stakeGWei, _acceptDelegation, vState);
+        IValidator val = new Validator(_val, _manager, _rate, stake, _acceptDelegation, vState);
         allValidatorAddrs.push(_val);
         valMaps[_val] = val;
         //update rewards record
         updateRewardsRecord();
-        uint debt = accRewardsPerStake * stakeGWei;
-        valInfos[_val] = ValidatorInfo(stakeGWei, debt, stakeGWei);
+        uint debt = accRewardsPerStake * stake;
+        valInfos[_val] = ValidatorInfo(stake, debt, 0, stake);
 
-        totalStakeGWei += stakeGWei;
+        totalStake += stake;
         // If the validator is Ready, add it to the topValidators and sort, and then emit ValidatorStateChanged event
         if (vState == State.Ready) {
             topValidators.improveRanking(val);
         }
-        emit ValidatorRegistered(_val, _manager, _rate, stakeGWei, vState);
+        emit ValidatorRegistered(_val, _manager, _rate, stake, vState);
 
-        emit TotalStakeGWeiChanged(_val, totalStakeGWei - stakeGWei, totalStakeGWei);
+        emit TotalStakeChanged(_val, totalStake - stake, totalStake);
     }
 
     // @dev addStake is used for a validator to add it's self stake
@@ -470,55 +470,55 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     }
 
     function addStakeOrDelegation(address _val, address _stakeOwner, bool byValidator) private {
-        uint deltaEth = mustConvertStake(msg.value);
+        mustConvertStake(msg.value);
 
         uint settledRewards = calcValidatorRewards(_val);
 
         IValidator val = valMaps[_val];
         RankingOp op = RankingOp.Noop;
-        uint stakeGWei = ethToGwei(deltaEth);
+        uint stake = msg.value;
         if (byValidator) {
-            op = val.addStake{value: settledRewards}(stakeGWei);
+            op = val.addStake{value: settledRewards}(stake);
         } else {
-            op = val.addDelegation{value: settledRewards}(stakeGWei, _stakeOwner);
+            op = val.addDelegation{value: settledRewards}(stake, _stakeOwner);
         }
         // update rewards info
         ValidatorInfo storage vInfo = valInfos[_val];
         // First, add stake
-        vInfo.stakeGWei += stakeGWei;
-        vInfo.unWithdrawn += stakeGWei;
+        vInfo.stake += stake;
+        vInfo.unWithdrawn += stake;
         //Second, reset debt
-        vInfo.debt = accRewardsPerStake * vInfo.stakeGWei;
+        vInfo.debt = accRewardsPerStake * vInfo.stake;
+        vInfo.incomeFees = 0;
 
-        totalStakeGWei += stakeGWei;
+        totalStake += stake;
 
         updateRanking(val, op);
 
-        emit TotalStakeGWeiChanged(_val, totalStakeGWei - stakeGWei, totalStakeGWei);
+        emit TotalStakeChanged(_val, totalStake - stake, totalStake);
     }
 
     // @dev subStake is used for a validator to subtract it's self stake.
-    // @param _deltaEth, the subtraction amount in unit of ether.
+    // @param _amount, the subtraction amount in unit of wei.
     // @notice The founder locking rule is handled here, and some other rules are handled by the Validator contract.
-    function subStake(address _val, uint256 _deltaEth) external onlyExistsAndByManager(_val) {
+    function subStake(address _val, uint256 _amount) external onlyExistsAndByManager(_val) {
         FounderLock memory fl = founders[_val];
-        uint stakeGWei = ethToGwei(_deltaEth);
-        bool ok = noFounderLocking(_val, fl, stakeGWei);
+        bool ok = noFounderLocking(_val, fl, _amount);
         require(ok, "E22");
 
-        subStakeOrDelegation(_val, stakeGWei, true);
+        subStakeOrDelegation(_val, _amount, true);
     }
 
-    function subDelegation(address _val, uint256 _deltaEth) external onlyExists(_val) {
-        subStakeOrDelegation(_val, ethToGwei(_deltaEth), false);
+    function subDelegation(address _val, uint256 _amount) external onlyExists(_val) {
+        subStakeOrDelegation(_val, _amount, false);
     }
 
-    function subStakeOrDelegation(address _val, uint256 _deltaGWei, bool byValidator) private {
-        // the input _deltaGWei should not be zero
-        require(_deltaGWei > 0, "E23");
+    function subStakeOrDelegation(address _val, uint256 _amount, bool byValidator) private {
+        // the input _amount should not be zero
+        require(_amount > 0, "E23");
         ValidatorInfo memory vInfo = valInfos[_val];
         // no enough stake to subtract
-        require(vInfo.stakeGWei >= _deltaGWei, "E24");
+        require(vInfo.stake >= _amount, "E24");
 
         uint settledRewards = calcValidatorRewards(_val);
 
@@ -526,12 +526,12 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         RankingOp op = RankingOp.Noop;
         address stakeOwner = msg.sender;
         if (byValidator) {
-            op = val.subStake{value: settledRewards}(_deltaGWei);
+            op = val.subStake{value: settledRewards}(_amount);
             stakeOwner = _val;
         } else {
-            op = val.subDelegation{value: settledRewards}(_deltaGWei, payable(msg.sender));
+            op = val.subDelegation{value: settledRewards}(_amount, payable(msg.sender));
         }
-        afterLessStake(_val, val, _deltaGWei, op);
+        afterLessStake(_val, val, _amount, op);
     }
 
     function exitStaking(address _val) external onlyExistsAndByManager(_val) {
@@ -548,15 +548,15 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         uint settledRewards = calcValidatorRewards(_val);
         IValidator val = valMaps[_val];
         RankingOp op = RankingOp.Noop;
-        uint stakeGWei = 0;
+        uint stake = 0;
         address stakeOwner = msg.sender;
         if (byValidator) {
-            (op, stakeGWei) = val.exitStaking{value: settledRewards}();
+            (op, stake) = val.exitStaking{value: settledRewards}();
             stakeOwner = _val;
         } else {
-            (op, stakeGWei) = val.exitDelegation{value: settledRewards}(msg.sender);
+            (op, stake) = val.exitDelegation{value: settledRewards}(msg.sender);
         }
-        afterLessStake(_val, val, stakeGWei, op);
+        afterLessStake(_val, val, stake, op);
     }
     // @dev validatorClaimAny claims any token that can be send to the manager of the specific validator.
     function validatorClaimAny(address _val) external onlyExistsAndByManager(_val) nonReentrant {
@@ -572,26 +572,26 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         uint settledRewards = calcValidatorRewards(_val);
         //reset debt
         ValidatorInfo storage vInfo = valInfos[_val];
-        vInfo.debt = accRewardsPerStake * vInfo.stakeGWei;
+        vInfo.debt = accRewardsPerStake * vInfo.stake;
+        vInfo.incomeFees = 0;
 
         // call IValidator function
         IValidator val = valMaps[_val];
         // the stakeEth had been deducted from totalStake at the time doing subtract or exit staking,
         // so we don't need to update the totalStake in here, just send it back to the owner.
-        uint stakeGwei = 0;
+        uint stake = 0;
         address payable recipient = payable(msg.sender);
         if (byValidator) {
-            stakeGwei = val.validatorClaimAny{value: settledRewards}(recipient);
+            stake = val.validatorClaimAny{value: settledRewards}(recipient);
         } else {
             uint forceUnbound = 0;
-            (stakeGwei, forceUnbound) = val.delegatorClaimAny{value: settledRewards}(recipient);
+            (stake, forceUnbound) = val.delegatorClaimAny{value: settledRewards}(recipient);
             if (forceUnbound > 0) {
-                totalStakeGWei -= forceUnbound;
+                totalStake -= forceUnbound;
             }
         }
-        if (stakeGwei > 0) {
-            valInfos[_val].unWithdrawn -= stakeGwei;
-            uint stake = gweiToWei(stakeGwei);
+        if (stake > 0) {
+            valInfos[_val].unWithdrawn -= stake;
             sendValue(recipient, stake);
             emit StakeWithdrawn(_val, msg.sender, stake);
         } else {
@@ -614,7 +614,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     function updateRewardsRecord() private {
         uint deltaBlock = block.number - lastUpdateAccBlock;
         if (deltaBlock > 0) {
-            accRewardsPerStake += (currRewardsPerBlock * deltaBlock) / totalStakeGWei;
+            accRewardsPerStake += (currRewardsPerBlock * deltaBlock) / totalStake;
             lastUpdateAccBlock = block.number;
         }
     }
@@ -625,9 +625,9 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         updateRewardsRecord();
         ValidatorInfo memory vInfo = valInfos[_val];
         // settle rewards of the validator
-        uint settledRewards = accRewardsPerStake * vInfo.stakeGWei - vInfo.debt;
+        uint settledRewards = accRewardsPerStake * vInfo.stake - vInfo.debt;
         settledRewards = checkStakingRewards(settledRewards);
-        return settledRewards;
+        return settledRewards + vInfo.incomeFees;
     }
 
     function checkStakingRewards(uint _targetExpenditure) private returns (uint) {
@@ -645,15 +645,16 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         return actual;
     }
 
-    function afterLessStake(address _val, IValidator val, uint _deltaGWei, RankingOp op) private {
+    function afterLessStake(address _val, IValidator val, uint _amount, RankingOp op) private {
         ValidatorInfo storage vInfo = valInfos[_val];
-        vInfo.stakeGWei -= _deltaGWei;
-        vInfo.debt = accRewardsPerStake * vInfo.stakeGWei;
+        vInfo.stake -= _amount;
+        vInfo.debt = accRewardsPerStake * vInfo.stake;
+        vInfo.incomeFees = 0;
 
-        totalStakeGWei -= _deltaGWei;
+        totalStake -= _amount;
         updateRanking(val, op);
 
-        emit TotalStakeGWeiChanged(_val, totalStakeGWei + _deltaGWei, totalStakeGWei);
+        emit TotalStakeChanged(_val, totalStake + _amount, totalStake);
     }
 
     function updateRanking(IValidator val, RankingOp op) private {
@@ -668,43 +669,43 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     }
 
     // @dev checkLocking checks if it's ok when a funding validator wants to subtracts some stakes.
-    function noFounderLocking(address _val, FounderLock memory fl, uint _deltaGWei) private returns (bool) {
+    function noFounderLocking(address _val, FounderLock memory fl, uint _amount) private returns (bool) {
         if (fl.locking) {
             if (block.timestamp < basicLockEnd) {
                 return false;
             } else {
-                // check if the _deltaGWei is valid.
-                uint targetUnbound = fl.unboundStakeGWei + _deltaGWei;
-                if (targetUnbound > fl.initialStakeGWei) {
-                    // _deltaGWei is too large.
+                // check if the _amount is valid.
+                uint targetUnbound = fl.unboundStake + _amount;
+                if (targetUnbound > fl.initialStake) {
+                    // _amount is too large.
                     return false;
                 }
                 if (releasePeriod > 0) {
                     uint _canReleaseCnt = (block.timestamp - basicLockEnd) / releasePeriod;
-                    uint _canReleaseAmount = (fl.initialStakeGWei * _canReleaseCnt) / releaseCount;
+                    uint _canReleaseAmount = (fl.initialStake * _canReleaseCnt) / releaseCount;
                     //
                     if (_canReleaseCnt >= releaseCount) {
                         // all unlocked
                         fl.locking = false;
-                        fl.unboundStakeGWei = targetUnbound;
+                        fl.unboundStake = targetUnbound;
                         founders[_val] = fl;
                         emit FounderUnlocked(_val);
                         // become no locking
                         return true;
                     } else {
                         if (targetUnbound <= _canReleaseAmount) {
-                            fl.unboundStakeGWei = targetUnbound;
+                            fl.unboundStake = targetUnbound;
                             founders[_val] = fl;
-                            // can subtract _deltaGWei;
+                            // can subtract _amount;
                             return true;
                         }
-                        // fl.unboundStakeGWei + _deltaGWei > _canReleaseAmount , return false
+                        // fl.unboundStake + _amount > _canReleaseAmount , return false
                         return false;
                     }
                 } else {
                     // no release period, just unlock
                     fl.locking = false;
-                    fl.unboundStakeGWei += _deltaGWei;
+                    fl.unboundStake += _amount;
                     founders[_val] = fl;
                     emit FounderUnlocked(_val);
                     // become no locking
@@ -739,14 +740,15 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         uint deltaBlock = block.number - lastUpdateAccBlock;
         uint expectedAccRPS = accRewardsPerStake;
         if (deltaBlock > 0) {
-            expectedAccRPS += (currRewardsPerBlock * deltaBlock) / totalStakeGWei;
+            expectedAccRPS += (currRewardsPerBlock * deltaBlock) / totalStake;
         }
         ValidatorInfo memory vInfo = valInfos[_val];
         // settle rewards of the validator
-        uint unsettledRewards = expectedAccRPS * vInfo.stakeGWei - vInfo.debt;
+        uint unsettledRewards = expectedAccRPS * vInfo.stake - vInfo.debt;
         if (unsettledRewards > totalStakingRewards) {
             unsettledRewards = totalStakingRewards;
         }
+        unsettledRewards += vInfo.incomeFees;
         IValidator val = valMaps[_val];
         if (isIncludingStake) {
             return val.anyClaimable(unsettledRewards, _stakeOwner);
@@ -767,12 +769,8 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         return lazyPunishRecords[_val].missedBlocksCounter;
     }
 
-    function ethToGwei(uint256 ethAmount) private pure returns (uint) {
-        return ethAmount * 1 gwei;
-    }
-
-    function gweiToWei(uint256 gweiAmount) private pure returns (uint) {
-        return gweiAmount * 1 gwei;
+    function ethToWei(uint256 ethAmount) private pure returns (uint) {
+        return ethAmount * 1 ether;
     }
 
     function isReleaseLockEnd() public view returns (bool) {
@@ -783,7 +781,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     function simulateUpdateRewardsRecord() public view returns (uint256) {
         uint deltaBlock = block.number - lastUpdateAccBlock;
         if (deltaBlock > 0) {
-            return accRewardsPerStake + (currRewardsPerBlock * deltaBlock) / totalStakeGWei;
+            return accRewardsPerStake + (currRewardsPerBlock * deltaBlock) / totalStake;
         }
         return accRewardsPerStake;
     }
