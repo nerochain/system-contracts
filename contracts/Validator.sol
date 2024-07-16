@@ -20,7 +20,7 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     // Delegation records all information about a delegation
     struct Delegation {
         bool exists; // indicates whether the delegator already exist
-        uint stake; // 
+        uint stake; //
         uint settled; // settled rewards, enlarged by COEFFICIENT times
         uint debt; // debt for the calculation of staking rewards, enlarged by COEFFICIENT times
         uint punishFree; // factor that this delegator free to be punished. For a new delegator or a delegator that already punished, this value will equal to accPunishFactor.
@@ -296,6 +296,7 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         Delegation storage dlg = delegators[_delegator];
         dlg.punishFree = accPunishFactor;
         if (amount > 0) {
+            uint stakeBeforeSlash = dlg.stake;
             // first try slashing from staking, and then from pendingUnbound.
             if (dlg.stake >= amount) {
                 dlg.stake -= amount;
@@ -304,6 +305,12 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
                 dlg.stake = 0;
                 slashFromUnbound(_delegator, restAmount);
             }
+            // update rewards info
+            uint expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
+            // Calculated based on the proportion of staking amount before and after slash.
+            uint rewards = (expectRewardsWithoutSlash * dlg.stake) / stakeBeforeSlash;
+            dlg.settled += rewards;
+            dlg.debt = dlg.stake * accRewardsPerStake;
         }
     }
 
@@ -473,13 +480,13 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
 
     function anyClaimable(uint _unsettledRewards, address _stakeOwner) external view override onlyOwner returns (uint) {
         uint rps = calcDeltaRPS(_unsettledRewards);
-        uint expectedAccRPS = accRewardsPerStake + rps;
 
         if (_stakeOwner == admin) {
             uint expectedCommission = currCommission + (_unsettledRewards * COEFFICIENT - (rps * totalStake));
-            return validatorClaimable(expectedCommission, expectedAccRPS);
+            return validatorClaimable(expectedCommission, rps);
         } else {
-            return delegatorClaimable(expectedAccRPS, _stakeOwner);
+            (uint rewards, uint stake) = delegatorClaimable(rps, _stakeOwner);
+            return rewards + stake;
         }
     }
 
@@ -487,19 +494,16 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         uint _unsettledRewards,
         address _stakeOwner
     ) external view override onlyOwner returns (uint) {
-        uint rps = calcDeltaRPS(_unsettledRewards);
-        uint expectedAccRPS = accRewardsPerStake + rps;
+        uint deltaRPS = calcDeltaRPS(_unsettledRewards);
 
-        uint claimable = 0;
+        uint rewards = 0;
         if (_stakeOwner == admin) {
-            uint expectedCommission = currCommission + (_unsettledRewards * COEFFICIENT - rps * totalStake);
-            claimable = expectedAccRPS * selfStake + selfSettledRewards - selfDebt;
-            claimable = claimable + expectedCommission;
+            uint expectedCommission = currCommission + (_unsettledRewards * COEFFICIENT - deltaRPS * totalStake);
+            rewards = validatorClaimableRewards(expectedCommission, deltaRPS);
         } else {
-            Delegation memory dlg = delegators[_stakeOwner];
-            claimable = expectedAccRPS * dlg.stake + dlg.settled - dlg.debt;
+            (rewards, ) = delegatorClaimable(deltaRPS, _stakeOwner);
         }
-        return claimable / COEFFICIENT;
+        return rewards;
     }
 
     function calcDeltaRPS(uint _unsettledRewards) private view returns (uint) {
@@ -517,7 +521,9 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
 
     function punish(uint _factor) external payable override onlyOwner {
         handleReceivedRewards();
-        // punish according to totalUnWithdrawn
+        // First, settle rewards for validator (important!)
+        selfSettledRewards += (selfStake * accRewardsPerStake) - selfDebt;
+        // Second, punish according to totalUnWithdrawn
         uint slashAmount = (totalUnWithdrawn * _factor) / PunishBase;
         if (totalStake >= slashAmount) {
             totalStake -= slashAmount;
@@ -534,6 +540,8 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
             slashFromUnbound(validator, fromPending);
         }
         totalUnWithdrawn -= slashAmount;
+        // Third, reset debt (important!)
+        selfDebt = selfStake * accRewardsPerStake;
 
         accPunishFactor += _factor;
 
@@ -543,12 +551,9 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         emit StateChanged(validator, block.coinbase, oldSt, state);
     }
 
-    function validatorClaimable(uint _expectedCommission, uint _expectedAccRPS) private view returns (uint) {
-        // the rewards was enlarged by COEFFICIENT times
-        uint claimable = _expectedAccRPS * selfStake + selfSettledRewards - selfDebt;
-        claimable = claimable + _expectedCommission;
-        // actual rewards in wei
-        claimable = claimable / COEFFICIENT;
+    // validator claimable rewards and unbounded stakes.
+    function validatorClaimable(uint _expectedCommission, uint _deltaRPS) private view returns (uint) {
+        uint claimable = validatorClaimableRewards(_expectedCommission, _deltaRPS);
         uint stake = 0;
         // calculates claimable stakes
         uint claimableUnbound = getClaimableUnbound(validator);
@@ -563,12 +568,23 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         return claimable;
     }
 
-    function delegatorClaimable(uint _expectedAccRPS, address _stakeOwner) private view returns (uint) {
+    function validatorClaimableRewards(uint _expectedCommission, uint _deltaRPS) private view returns (uint) {
+        // the rewards was enlarged by COEFFICIENT times
+        uint claimable = (accRewardsPerStake + _deltaRPS) * selfStake + selfSettledRewards - selfDebt;
+        claimable = claimable + _expectedCommission;
+        // actual rewards in wei
+        claimable = claimable / COEFFICIENT;
+        return claimable;
+    }
+
+    // returns: claimableRewards,claimableStakes
+    function delegatorClaimable(uint _deltaRPS, address _stakeOwner) private view returns (uint, uint) {
         Delegation memory dlg = delegators[_stakeOwner];
 
         // handle punishment
         uint slashAmount = calcDelegatorPunishment(_stakeOwner);
         uint slashAmountFromPending = 0;
+        uint stakeBeforeSlash = dlg.stake;
         if (slashAmount > 0) {
             // first try slashing from staking, and then from pendingUnbound.
             if (dlg.stake >= slashAmount) {
@@ -579,9 +595,14 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
             }
         }
         // staking rewards
-        uint claimable = _expectedAccRPS * dlg.stake + dlg.settled - dlg.debt;
+        uint expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
+        // Calculated based on the proportion of staking amount before and after slash.
+        uint rewards = (expectRewardsWithoutSlash * dlg.stake) / stakeBeforeSlash;
+        rewards += dlg.stake * _deltaRPS;
+        rewards += dlg.settled;
         // actual rewards in wei
-        claimable = claimable / COEFFICIENT;
+        rewards = rewards / COEFFICIENT;
+
         uint stake = 0;
         // calculates withdraw-able stakes
         uint claimableUnbound = getClaimableUnbound(_stakeOwner);
@@ -597,10 +618,8 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         if (state == State.Exit && exitLockEnd <= block.timestamp) {
             stake += dlg.stake;
         }
-        if (stake > 0) {
-            claimable += stake;
-        }
-        return claimable;
+
+        return (rewards, stake);
     }
 
     function getClaimableUnbound(address _owner) private view returns (uint) {
@@ -621,12 +640,12 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         return amount;
     }
 
-    function getPendingUnboundRecord(address _owner, uint _index) public view returns (uint _amount, uint _lockEnd) {
+    function getPendingUnboundRecord(address _owner, uint _index) external view returns (uint _amount, uint _lockEnd) {
         PendingUnbound memory r = unboundRecords[_owner].pending[_index];
         return (r.amount, r.lockEnd);
     }
 
-    function getAllDelegatorsLength() public view returns (uint) {
+    function getAllDelegatorsLength() external view returns (uint) {
         return allDelegatorAddrs.length;
     }
 

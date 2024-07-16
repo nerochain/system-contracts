@@ -352,7 +352,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         emit LogDoubleSignPunishValidator(_val, block.timestamp);
     }
 
-    function isDoubleSignPunished(bytes32 punishHash) public view returns (bool) {
+    function isDoubleSignPunished(bytes32 punishHash) external view returns (bool) {
         return doubleSignPunished[punishHash];
     }
 
@@ -690,14 +690,14 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     // @dev anyClaimable returns how much token(rewards and unbound stakes) can be currently claimed
     // for the specific stakeOwner on a specific validator.
     // @param _stakeOwner, for delegator, this is the delegator address; for validator, this must be the manager(admin) address of the validator.
-    function anyClaimable(address _val, address _stakeOwner) public view returns (uint) {
+    function anyClaimable(address _val, address _stakeOwner) external view returns (uint) {
         return claimableHandler(_val, _stakeOwner, true);
     }
 
     // @dev claimableRewards returns how much rewards can be currently claimed
     // for the specific stakeOwner on a specific validator.
     // @param _stakeOwner, for delegator, this is the delegator address; for validator, this must be the manager(admin) address of the validator.
-    function claimableRewards(address _val, address _stakeOwner) public view returns (uint) {
+    function claimableRewards(address _val, address _stakeOwner) external view returns (uint) {
         return claimableHandler(_val, _stakeOwner, false);
     }
 
@@ -731,11 +731,11 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         return allValidatorAddrs.length;
     }
 
-    function getPunishValidatorsLen() public view returns (uint256) {
+    function getPunishValidatorsLen() external view returns (uint256) {
         return lazyPunishedValidators.length;
     }
 
-    function getPunishRecord(address _val) public view returns (uint256) {
+    function getPunishRecord(address _val) external view returns (uint256) {
         return lazyPunishRecords[_val].missedBlocksCounter;
     }
 
