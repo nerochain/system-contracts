@@ -3,15 +3,20 @@ pragma solidity 0.8.19;
 
 contract GenesisLock {
     uint256 public startTime;
-    uint256 public periodTime;// = 2592000; //60*60*24*30 = 2592000
+    uint256 public periodTime; // eg. 604800, 60*60*24*7 = 604800
 
     /**
-    * userType:
-    * 1 community pool,
-    * 2 private sale,
-    * 3 team,
-    * 4 Ecosystem foundation
-    */
+     * userType:
+     * 1 Angel
+     * 2 Pre-seed
+     * 3 Seed
+     * 4 Public
+     * 5 Treasury & Partnerships Fund
+     * 6 Staking rewards
+     * 7 Liquidity
+     * 8 Team
+     * 9 Advisors
+     */
     mapping(address => uint256) public userType;
     //user's lock-up amount
     mapping(address => uint256) public userLockedAmount;
@@ -27,7 +32,13 @@ contract GenesisLock {
     // records about rights changing operation, oldOwner => newOwner;
     mapping(address => address) public rightsChanging;
 
-    event LockRecordAppened(address indexed _owner, uint _typeId, uint _lockAmount, uint _firstLockTime, uint _lockPeriod);
+    event LockRecordAppened(
+        address indexed _owner,
+        uint _typeId,
+        uint _lockAmount,
+        uint _firstLockTime,
+        uint _lockPeriod
+    );
     event ReleaseClaimed(address indexed _owner, uint _claimedPeriodCount, uint _claimedAmount);
     event RightsChanging(address indexed _fromOwner, address indexed _toOwner);
     event RightsAccepted(address indexed _fromOwner, address indexed _toOwner);
@@ -41,10 +52,10 @@ contract GenesisLock {
         periodTime = _periodTime;
     }
     /**
-    *   init the data of all users
-    *   The input parameters are 5 equal-length arrays, which store the user's account address, userType, userLockedAmount, firstPeriodLockedTime, and lockedPeriodAmount.
-    *   The elements of the above 5 arrays need to be strictly indexed to prevent data errors
-    */
+     *   init the data of all users
+     *   The input parameters are 5 equal-length arrays, which store the user's account address, userType, userLockedAmount, firstPeriodLockedTime, and lockedPeriodAmount.
+     *   The elements of the above 5 arrays need to be strictly indexed to prevent data errors
+     */
     function init(
         address[] memory userAddress,
         uint256[] memory typeId,
@@ -74,7 +85,12 @@ contract GenesisLock {
     }
 
     // @dev append new locking record to a given user.
-    function appendLockRecord(address _userAddr, uint256 _typeId, uint256 _firstLockTime, uint256 _lockPeriodCnt) external payable {
+    function appendLockRecord(
+        address _userAddr,
+        uint256 _typeId,
+        uint256 _firstLockTime,
+        uint256 _lockPeriodCnt
+    ) external payable {
         require(msg.value > 100 ether, "too trivial");
         require(_userAddr != address(0), "zero address");
         require(_typeId > 0, "need a type id for human read");
@@ -91,10 +107,10 @@ contract GenesisLock {
     }
 
     /**
-    *   user claim the unlocked asset
-    */
+     *   user claim the unlocked asset
+     */
     function claim() external {
-        (uint256 claimableAmt,uint256 period) = getClaimableAmount(msg.sender);
+        (uint256 claimableAmt, uint256 period) = getClaimableAmount(msg.sender);
         require(claimableAmt > 0 && period > 0, "Have no token released");
 
         uint256 startTimestamp = startTime + firstPeriodLockedTime[msg.sender];
@@ -106,24 +122,24 @@ contract GenesisLock {
         }
         claimedPeriod[msg.sender] += period;
 
-        (bool success,) = msg.sender.call{value : claimableAmt}(new bytes(0));
+        (bool success, ) = msg.sender.call{value: claimableAmt}(new bytes(0));
         require(success, "transfer failed!");
         emit ReleaseClaimed(msg.sender, period, claimableAmt);
     }
 
-    // query the Claimable Amount 
+    // query the Claimable Amount
     function getClaimableAmount(address account) public view returns (uint256 claimableAmt, uint256 period) {
         period = getClaimablePeriod(account);
         if (claimedPeriod[account] + period == lockedPeriodAmount[account]) {
             uint256 alreadyClaimed = (userLockedAmount[account] / lockedPeriodAmount[account]) * claimedPeriod[account];
             claimableAmt = userLockedAmount[account] - alreadyClaimed;
         } else {
-            claimableAmt = userLockedAmount[account] / lockedPeriodAmount[account] * period;
+            claimableAmt = (userLockedAmount[account] / lockedPeriodAmount[account]) * period;
         }
     }
 
     // query the Claimable Period
-    function getClaimablePeriod(address account) public view returns (uint256 period){
+    function getClaimablePeriod(address account) public view returns (uint256 period) {
         period = 0;
         uint256 startTimestamp = startTime + firstPeriodLockedTime[account];
         uint256 maxClaimablePeriod = lockedPeriodAmount[account] - claimedPeriod[account];
@@ -145,8 +161,8 @@ contract GenesisLock {
     }
 
     /**
-    * query the released 
-    */
+     * query the released
+     */
     function getUserReleasedPeriod(address account) internal view returns (uint256 period) {
         uint256 startTimestamp = startTime + firstPeriodLockedTime[account];
         if (block.timestamp > startTimestamp) {
@@ -162,6 +178,7 @@ contract GenesisLock {
         require(userLockedAmount[msg.sender] > 0, "sender have no lock-up");
         require(userLockedAmount[_to] == 0, "_to address already have lock-up");
         require(lockedPeriodAmount[msg.sender] > claimedPeriod[msg.sender], "all claimed, no need to do anything");
+        require(_to != address(0), "invalid address");
 
         // If there's an ongoing changing record, we allow just to overwrite it.
         // and there's no need to check the _to address, because the _to address need to do an acceptance.
@@ -192,16 +209,22 @@ contract GenesisLock {
     }
 
     /**
-    * query the base info
-    */
-    function getUserInfo(address account) external view returns (
-        uint256 typId,
-        uint256 lockedAount,
-        uint256 firstLockTime,
-        uint256 totalPeriod,
-        uint256 alreadyClaimed,
-        uint256 releases
-    ) {
+     * query the base info
+     */
+    function getUserInfo(
+        address account
+    )
+        external
+        view
+        returns (
+            uint256 typId,
+            uint256 lockedAount,
+            uint256 firstLockTime,
+            uint256 totalPeriod,
+            uint256 alreadyClaimed,
+            uint256 releases
+        )
+    {
         typId = userType[account];
         lockedAount = userLockedAmount[account];
         firstLockTime = firstPeriodLockedTime[account];
