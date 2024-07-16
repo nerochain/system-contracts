@@ -126,7 +126,10 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
 
     // @notice The founder locking rule is handled by Staking contract, not in here.
     // @return an operation enum about the ranking
-    function subStake(uint256 _stake) external payable override onlyOwner onlyCanDoStaking returns (RankingOp) {
+    function subStake(
+        uint256 _stake,
+        bool _isUnbound
+    ) external payable override onlyOwner onlyCanDoStaking returns (RankingOp) {
         // Break minSelfStakes limit, try exitStaking
         require(selfStake >= _stake + MinSelfStakes, "E31");
 
@@ -136,8 +139,13 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         selfStake -= _stake;
         RankingOp op = subTotalStake(_stake, admin);
 
-        // pending unbound stake, use `validator` as the stakeOwner, because the manager can be changed.
-        addUnboundRecord(validator, _stake);
+        if (_isUnbound) {
+            // pending unbound stake, use `validator` as the stakeOwner, because the manager can be changed.
+            addUnboundRecord(validator, _stake);
+        } else {
+            // for reStaking, the token is no longer belong to the validator, so we need to subtract it from the totalUnWithdrawn.
+            totalUnWithdrawn -= _stake;
+        }
         return op;
     }
 
@@ -217,10 +225,11 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
 
     function subDelegation(
         uint256 _stake,
-        address _delegator
+        address _delegator,
+        bool _isUnbound
     ) external payable override onlyOwner onlyCanDoStaking returns (RankingOp) {
         handleDelegatorPunishment(_delegator);
-        return innerSubDelegation(_stake, _delegator);
+        return innerSubDelegation(_stake, _delegator, _isUnbound);
     }
 
     function exitDelegation(
@@ -233,11 +242,11 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         handleDelegatorPunishment(_delegator);
 
         uint oldStake = dlg.stake;
-        RankingOp op = innerSubDelegation(oldStake, _delegator);
+        RankingOp op = innerSubDelegation(oldStake, _delegator, true);
         return (op, oldStake);
     }
 
-    function innerSubDelegation(uint256 _stake, address _delegator) private returns (RankingOp) {
+    function innerSubDelegation(uint256 _stake, address _delegator, bool _isUnbound) private returns (RankingOp) {
         Delegation storage dlg = delegators[_delegator];
         // no enough stake to subtract
         require(dlg.stake >= _stake, "E24");
@@ -247,7 +256,12 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         dlg.settled += _stake * accRewardsPerStake;
         dlg.stake -= _stake;
 
-        addUnboundRecord(_delegator, _stake);
+        if (_isUnbound) {
+            addUnboundRecord(_delegator, _stake);
+        } else {
+            // for reStaking, the token is no longer belong to the validator, so we need to subtract it from the totalUnWithdrawn.
+            totalUnWithdrawn -= _stake;
+        }
 
         RankingOp op = subTotalStake(_stake, _delegator);
 

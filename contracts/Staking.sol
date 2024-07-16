@@ -431,40 +431,39 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     function addStake(address _val) external payable onlyExistsAndByManager(_val) {
         // founder locking
         require(founders[_val].locking == false || isReleaseLockEnd(), "E22");
-        addStakeOrDelegation(_val, _val, true);
+        addStakeOrDelegation(_val, _val, msg.value, true);
     }
 
     function addDelegation(address _val) external payable onlyExists(_val) {
-        addStakeOrDelegation(_val, msg.sender, false);
+        addStakeOrDelegation(_val, msg.sender, msg.value, false);
     }
 
-    function addStakeOrDelegation(address _val, address _stakeOwner, bool byValidator) private {
-        mustConvertStake(msg.value);
+    function addStakeOrDelegation(address _val, address _stakeOwner, uint256 _amount, bool _byValidator) private {
+        mustConvertStake(_amount);
 
         uint settledRewards = calcValidatorRewards(_val);
 
         IValidator val = valMaps[_val];
         RankingOp op = RankingOp.Noop;
-        uint stake = msg.value;
-        if (byValidator) {
-            op = val.addStake{value: settledRewards}(stake);
+        if (_byValidator) {
+            op = val.addStake{value: settledRewards}(_amount);
         } else {
-            op = val.addDelegation{value: settledRewards}(stake, _stakeOwner);
+            op = val.addDelegation{value: settledRewards}(_amount, _stakeOwner);
         }
         // update rewards info
         ValidatorInfo storage vInfo = valInfos[_val];
         // First, add stake
-        vInfo.stake += stake;
-        vInfo.unWithdrawn += stake;
+        vInfo.stake += _amount;
+        vInfo.unWithdrawn += _amount;
         //Second, reset debt
         vInfo.debt = accRewardsPerStake * vInfo.stake;
         vInfo.incomeFees = 0;
 
-        totalStake += stake;
+        totalStake += _amount;
 
         updateRanking(val, op);
 
-        emit TotalStakeChanged(_val, totalStake - stake, totalStake);
+        emit TotalStakeChanged(_val, totalStake - _amount, totalStake);
     }
 
     // @dev subStake is used for a validator to subtract it's self stake.
@@ -475,14 +474,14 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         bool ok = noFounderLocking(_val, fl, _amount);
         require(ok, "E22");
 
-        subStakeOrDelegation(_val, _amount, true);
+        subStakeOrDelegation(_val, _amount, true, true);
     }
 
     function subDelegation(address _val, uint256 _amount) external onlyExists(_val) {
-        subStakeOrDelegation(_val, _amount, false);
+        subStakeOrDelegation(_val, _amount, false, true);
     }
 
-    function subStakeOrDelegation(address _val, uint256 _amount, bool byValidator) private {
+    function subStakeOrDelegation(address _val, uint256 _amount, bool _byValidator, bool _isUnbound) private {
         // the input _amount should not be zero
         require(_amount > 0, "E23");
         ValidatorInfo memory vInfo = valInfos[_val];
@@ -493,14 +492,48 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
 
         IValidator val = valMaps[_val];
         RankingOp op = RankingOp.Noop;
-        address stakeOwner = msg.sender;
-        if (byValidator) {
-            op = val.subStake{value: settledRewards}(_amount);
-            stakeOwner = _val;
+        if (_byValidator) {
+            op = val.subStake{value: settledRewards}(_amount, _isUnbound);
         } else {
-            op = val.subDelegation{value: settledRewards}(_amount, payable(msg.sender));
+            op = val.subDelegation{value: settledRewards}(_amount, msg.sender, _isUnbound);
         }
         afterLessStake(_val, val, _amount, op);
+    }
+
+    /**
+     * @dev reStaking is used for a validator to move it's self stake to a new validator (as its delegator).
+     * @param _oldVal, the validitor moved from.
+     * @param _newVal, the validitor moved to.
+     **/
+    function reStaking(
+        address _oldVal,
+        address _newVal,
+        uint256 _amount
+    ) external nonReentrant onlyExistsAndByManager(_oldVal) onlyExists(_newVal) {
+        doReStake(_oldVal, _newVal, _amount, true);
+    }
+
+    /**
+     * @dev reDelegation is used for a user to move it's stake to a new validator.
+     * @param _oldVal, the validitor moved from.
+     * @param _newVal, the validitor moved to.
+     **/
+    function reDelegation(
+        address _oldVal,
+        address _newVal,
+        uint256 _amount
+    ) external nonReentrant onlyExists(_oldVal) onlyExists(_newVal) {
+        doReStake(_oldVal, _newVal, _amount, false);
+    }
+
+    function doReStake(address _oldVal, address _newVal, uint256 _amount, bool _byValidator) private {
+        doClaimAny(_oldVal, _byValidator);
+        subStakeOrDelegation(_oldVal, _amount, _byValidator, false);
+        // For restaking, the stake was removed from old validator, without lock-period,
+        // so we need to subtract it from the validator's unWithdrawn.
+        valInfos[_oldVal].unWithdrawn -= _amount;
+
+        addStakeOrDelegation(_newVal, msg.sender, _amount, false);
     }
 
     function exitStaking(address _val) external onlyExistsAndByManager(_val) {

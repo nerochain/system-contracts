@@ -55,7 +55,7 @@ contract Validator is WithAdmin, IValidator {
 
     // @notice The founder locking rule is handled by Staking contract, not in here.
     // @return an operation enum about the ranking
-    function subStake(uint256 ) external override payable onlyOwner  returns (RankingOp){
+    function subStake(uint256, bool) external override payable onlyOwner  returns (RankingOp){
         return RankingOp.Noop;
 
     }
@@ -74,7 +74,7 @@ contract Validator is WithAdmin, IValidator {
         return RankingOp.Noop;
     }
 
-    function subDelegation(uint256 , address ) external override payable onlyOwner  returns (RankingOp){
+    function subDelegation(uint256 , address, bool) external override payable onlyOwner  returns (RankingOp){
         return RankingOp.Noop;
 
     }
