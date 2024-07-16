@@ -343,7 +343,14 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         if (dlg.stake > 0 || pendingAmount > 0) {
             // total stake
             uint totalDelegation = dlg.stake + pendingAmount;
-            amount = (totalDelegation * deltaFactor) / PunishBase;
+            // A rare case: the validator was punished multiple times,
+            // but during this period the delegator did not perform any operations,
+            // and then the deltaFactor exceeded the PunishBase.
+            if (deltaFactor >= PunishBase) {
+                amount = totalDelegation;
+            } else {
+                amount = (totalDelegation * deltaFactor) / PunishBase;
+            }
         }
         return amount;
     }
