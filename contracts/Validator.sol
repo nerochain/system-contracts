@@ -271,6 +271,7 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     function delegatorClaimAny(
         address payable _delegator
     ) external payable override onlyOwner returns (uint256 _stake, uint256 _forceUnbound) {
+        require(delegators[_delegator].exists, "E36");
         handleDelegatorPunishment(_delegator);
 
         handleReceivedRewards();
@@ -319,12 +320,14 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
                 dlg.stake = 0;
                 slashFromUnbound(_delegator, restAmount);
             }
-            // update rewards info
-            uint expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
-            // Calculated based on the proportion of staking amount before and after slash.
-            uint rewards = (expectRewardsWithoutSlash * dlg.stake) / stakeBeforeSlash;
-            dlg.settled += rewards;
-            dlg.debt = dlg.stake * accRewardsPerStake;
+            if (stakeBeforeSlash > 0) {
+                // update rewards info
+                uint expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
+                // Calculated based on the proportion of staking amount before and after slash.
+                uint rewards = (expectRewardsWithoutSlash * dlg.stake) / stakeBeforeSlash;
+                dlg.settled += rewards;
+                dlg.debt = dlg.stake * accRewardsPerStake;
+            }
         }
     }
 
@@ -601,7 +604,9 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     // returns: claimableRewards,claimableStakes
     function delegatorClaimable(uint _deltaRPS, address _stakeOwner) private view returns (uint, uint) {
         Delegation memory dlg = delegators[_stakeOwner];
-
+        if (!dlg.exists) {
+            return (0, 0);
+        }
         // handle punishment
         uint slashAmount = calcDelegatorPunishment(_stakeOwner);
         uint slashAmountFromPending = 0;
@@ -615,14 +620,17 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
                 dlg.stake = 0;
             }
         }
-        // staking rewards
-        uint expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
-        // Calculated based on the proportion of staking amount before and after slash.
-        uint rewards = (expectRewardsWithoutSlash * dlg.stake) / stakeBeforeSlash;
-        rewards += dlg.stake * _deltaRPS;
-        rewards += dlg.settled;
-        // actual rewards in wei
-        rewards = rewards / COEFFICIENT;
+        uint rewards = 0;
+        if (stakeBeforeSlash > 0) {
+            // staking rewards
+            uint expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
+            // Calculated based on the proportion of staking amount before and after slash.
+            rewards = (expectRewardsWithoutSlash * dlg.stake) / stakeBeforeSlash;
+            rewards += dlg.stake * _deltaRPS;
+            rewards += dlg.settled;
+            // actual rewards in wei
+            rewards = rewards / COEFFICIENT;
+        }
 
         uint stake = 0;
         // calculates withdraw-able stakes
