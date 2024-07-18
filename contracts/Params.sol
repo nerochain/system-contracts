@@ -9,7 +9,7 @@ contract Params {
     address private constant engineCaller =
         address(0x000000000000000000004e65726F456e67696e65);
     // max active validators
-    uint8 public constant MaxValidators = 21;
+    uint8 public constant MaxValidators = 25;
 
     uint public constant MaxStakes = 200_000_000 * 1 ether; // max total stakes for a validator
     // min total stakes for a validator to be a valid candidate.
