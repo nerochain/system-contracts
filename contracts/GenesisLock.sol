@@ -218,7 +218,7 @@ contract GenesisLock {
         view
         returns (
             uint256 typId,
-            uint256 lockedAount,
+            uint256 lockedAmount,
             uint256 firstLockTime,
             uint256 totalPeriod,
             uint256 alreadyClaimed,
@@ -226,7 +226,7 @@ contract GenesisLock {
         )
     {
         typId = userType[account];
-        lockedAount = userLockedAmount[account];
+        lockedAmount = userLockedAmount[account];
         firstLockTime = firstPeriodLockedTime[account];
         totalPeriod = lockedPeriodAmount[account];
         alreadyClaimed = claimedPeriod[account];
