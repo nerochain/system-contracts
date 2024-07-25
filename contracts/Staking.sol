@@ -144,8 +144,6 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     )
         external
         payable
-        // #if !Mainnet
-        // #endif
         initializer
     {
         require(_admin != address(0), "E09");
@@ -780,7 +778,8 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         return (block.timestamp >= basicLockEnd) && (block.timestamp - basicLockEnd) >= (releasePeriod * releaseCount);
     }
 
-    // #if !Mainnet
+    // #if Mainnet
+    // #else
     function simulateUpdateRewardsRecord() public view returns (uint256) {
         uint deltaBlock = block.number - lastUpdateAccBlock;
         if (deltaBlock > 0) {

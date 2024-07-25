@@ -3,7 +3,7 @@ pragma solidity 0.8.19;
 
 // for testcase only
 contract Params {
-
+    uint internal constant COEFFICIENT = 1e18;
     // System params
     uint8 public constant MaxValidators = 21;
 
