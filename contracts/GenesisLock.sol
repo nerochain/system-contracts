@@ -110,6 +110,7 @@ contract GenesisLock {
      *   user claim the unlocked asset
      */
     function claim() external {
+        require(rightsChanging[msg.sender] == address(0),"All right on changing");
         (uint256 claimableAmt, uint256 period) = getClaimableAmount(msg.sender);
         require(claimableAmt > 0 && period > 0, "Have no token released");
 
