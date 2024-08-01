@@ -44,8 +44,6 @@ describe("GenesisLock contract test", function () {
         contractAddress = ethers.getCreateAddress({from,nonce});
         lock = await LockingContract.deploy();
         mockAccount = await MockAccount.deploy(lock.target);
-        console.log(contractAddress);
-        console.log(lock.target);
         // snapshotId = await utils.takeSnapshot();
         // console.log(snapshotId);
     });
