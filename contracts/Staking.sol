@@ -40,7 +40,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     enum Operation {
         DistributeFee,
         UpdateValidators,
-        UpdateRewardsPerBlock,
+        UpdateRewardsPerBlock, //not use
         LazyPunish,
         DecreaseMissingBlockCounter
     }
