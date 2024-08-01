@@ -29,22 +29,32 @@ function convertNum(num) {
 }
 
 const params = {
+    MaxValidators: 21,
+
     MaxStakes: 24000000,
     OverMaxStakes: 24000001,
-    ThresholdStakes: 50000,
-    MinSelfStakes: 50000,
+    ThresholdStakes: 2_000_000,
+    MinSelfStakes: 150_000,
     StakeUnit: 1,
     FounderLock: 3600,
     releasePeriod: 60,
-    releaseCount: 24,
+    releaseCount: 100,
 
     totalRewards: utils.ethToWei("25000000"),
     rewardsPerBlock: utils.ethToWei("10"),
-    epoch: 200,
+    epoch: 2,
     ruEpoch: 5,
+    JailPeriod: 86400,
 
-    singleValStake: utils.ethToWei("500000"),
-    singleValStakeEth: "500000",
+    singleValStake: utils.ethToWei("2000000"),
+    singleValStakeEth: "2000000",
+
+    LazyPunishThreshold: 3,
+    DecreaseRate: 1,
+
+    LazyPunishFactor: 1,
+    EvilPunishFactor: 10,
+    PunishBase: 1000,
 }
 
 describe("Staking Test", function () {
@@ -57,7 +67,7 @@ describe("Staking Test", function () {
  
 
     beforeEach( async function() {
-        let Staking = await ethers.getContractFactory("Staking");
+        let Staking = await hre.ethers.getContractFactory("cache/solpp-generated-contracts/Staking.sol:Staking");
         instance = await Staking.deploy();
         [owner,user1,user2,user3, ...users] = await ethers.getSigners();
         valFactory = await ethers.getContractFactory("cache/solpp-generated-contracts/Validator.sol:Validator");
@@ -66,21 +76,21 @@ describe("Staking Test", function () {
         // uint256 _epoch,
         // address payable _foundationPool
         // console.log("Staking: ",instance.target);
-        BTR = await hre.ethers.getContractFactory("BTR");
-        btr = await BTR.deploy(
-            [user3.address],
-            [ethers.parseUnits("1000000000",18)]
-        );
-        // console.log("BTR: ",btr.target);
+        let balance = params.singleValStake * BigInt('24');
+        balance = balance + params.totalRewards;
 
         let args = [
-            owner.address,
-            btr.target,
+            owner,
+            params.FounderLock,
+            params.releasePeriod,
+            params.releaseCount,
+            params.totalRewards,
+            params.rewardsPerBlock,
             params.epoch,
-            user3.address
+            {
+                value:balance
+            }
         ]
-        let balance = params.singleValStake * BigInt(3);
-        balance = balance + params.totalRewards ;
         await instance.initialize(...args);
 
     })
@@ -97,7 +107,13 @@ describe("Staking Test", function () {
         beforeEach(async () => {
             for(let i=0;i<3;i++) {
                 let _val = users[i].address;
-                await instance.initValidator(_val, user1.address, 10, true);
+                await instance.initValidator( 
+                    _val, 
+                    user1.address, 
+                    50, 
+                    params.singleValStake,
+                    true
+                );
             }
         });
         
@@ -111,21 +127,15 @@ describe("Staking Test", function () {
             expect(await validator.state()).to.be.equal(1);
 
             // update block
-            // let basicLockEnd = await instance.getBasicLockEnd();
-            // basicLockEnd = + basicLockEnd.toString();
-            // let period = params.releaseCount * params.releasePeriod
-            // await ethers.provider.send("evm_mine",[basicLockEnd + period])
+            let basicLockEnd = await instance.basicLockEnd();
+            basicLockEnd = + basicLockEnd.toString();
+            let period = params.releaseCount * params.releasePeriod
+            await ethers.provider.send("evm_mine",[basicLockEnd + period]);
 
-            let bal_init = await btr.balanceOf(validator.target);
+            let bal_init = await ethers.provider.getBalance(validator.target);
             expect(bal_init).to.be.equal(0);
-
-            await btr.connect(user3).transfer(user1.address, value * BigInt(2));
-            expect(await btr.balanceOf(user1.address)).to.be.eq(value * BigInt(2));
-            await btr.connect(user3).approve(instance.target,value * BigInt(2000000))
-            await btr.connect(user1).approve(instance.target,value * BigInt(2000000))
-
             // add stake 
-            await instance.connect(user1).addStake(users[0].address,value * BigInt(2));
+            await instance.connect(user1).addStake(users[0].address,{value:value * BigInt(2)});
 
    
             // wait 16  blocks
@@ -138,7 +148,7 @@ describe("Staking Test", function () {
             //claim
  
             await instance.connect(user1).validatorClaimAny(users[0].address);
-            expect(await btr.balanceOf(validator.target)).to.be.equal(0);
+            expect(await ethers.provider.getBalance(validator.target)).to.be.equal(0);
         });
  
 
@@ -147,22 +157,22 @@ describe("Staking Test", function () {
             let validator = valFactory.attach(valContractAddr);
             // update block
 
-            await btr.connect(user3).transfer(user1.address, value * BigInt(2));
-            expect(await btr.balanceOf(user1.address)).to.be.eq(value * BigInt(2));
-            await btr.connect(user3).transfer(owner.address, value * BigInt(2));
-            await btr.connect(user3).approve(instance.target,value * BigInt(2000000))
-            await btr.connect(user1).approve(instance.target,value * BigInt(2000000))
-            await btr.connect(owner).approve(instance.target,value * BigInt(2000000))
-
-
+            let basicLockEnd = await instance.basicLockEnd();
+            basicLockEnd = + basicLockEnd.toString();
+            let period = params.releaseCount * params.releasePeriod
+            await ethers.provider.send("evm_mine",[basicLockEnd + period])
+            let bal_init = await ethers.provider.getBalance(validator.target);
+            expect(bal_init).to.be.equal(0);
             // add stake 
-            await instance.connect(user1).addStake(users[0].address,value * BigInt(2));
+            await instance.connect(user1).addStake(users[0].address,{value:value * BigInt(2)});
             // wait 16  blocks
             await ethers.provider.send("hardhat_mine",["0x10"]);
             // add stake delegate
 
 
-            await instance.addDelegation(users[0].address,value);
+            await instance.addDelegation(users[0].address,{
+                value: utils.ethToWei("1")
+            });
             
             await ethers.provider.send("hardhat_mine",["0x10"]);
             //exit stake
