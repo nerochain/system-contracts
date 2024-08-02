@@ -15,7 +15,7 @@ const params = {
     MaxStakes: "24000000",
     OverMaxStakes: "24000001",
     ThresholdStakes: "2000000",
-    MinSelfStakes: "50000",
+    MinSelfStakes: "150000",
     StakeUnit: 1,
     LazyPunishFactor: 1,
     EvilPunishFactor: "10",
@@ -138,21 +138,13 @@ describe("Validator test", function () {
     });
 
     it('4. should correct for delegatorClaimAny', async () => {
-        totalStake = await validator.totalStake();
-        console.log(totalStake);
-        const accp = await validator.accRewardsPerStake();
-        console.log("accRewardsPerStake:",accp.toString());
-
         let delegatorRewards = utils.ethToWei(params.ThresholdStakes);
         let delegator = signers[3].address;
-        // await validator.receiveFee({value:delegatorRewards});
         // console.log(await validator.delegators(delegator));
-        const  amount = await validator.anyClaimable(delegatorRewards, delegator);
-        console.log(amount);
-
-        await expect(validator.delegatorClaimAny(delegator,{vaule: delegatorRewards})).to
+        const amount = await validator.anyClaimable(delegatorRewards , delegator);
+        await expect(validator.delegatorClaimAny(delegator, {value: delegatorRewards})).to
             .emit(validator, "RewardsWithdrawn")
-            .withArgs(vaddr, delegator, amount[1]);
+            .withArgs(vaddr, delegator, amount);
     });
 
 })
@@ -196,7 +188,7 @@ describe("Validator independent test", function () {
         // validator subtract 100k,
         // ==> 900k, 400k, 500k
         // currTotalStake = 1m
-        // stake = 500000
+        // stake = 500k
         // ThresholdStakes
         // MinSelfStakes
 
@@ -237,31 +229,30 @@ describe("Validator independent test", function () {
 
         let delegatorExpectRewards = currTotalRewards1 - valExpectRewards;
         delegatorExpectRewards = delegatorExpectRewards / BigInt(1000000) *  BigInt(1000000);
-        await validator.receiveFee({value:currTotalRewards1});
+        // await validator.receiveFee({value:currTotalRewards1});
 
         let selfStake = await validator.selfStake();
         // console.log(selfStake);
 
         expect(await validator.testGetClaimableUnbound(vaddr)).eq(delta);
-        const account1 = await validator.anyClaimable(delegator)
-        expect(account1[1]).eq(delegatorExpectRewards);
+        const account1 = await validator.anyClaimable(currTotalRewards1,delegator);
+        expect(account1).eq(delegatorExpectRewards);
 
-        const rewards = await validator.anyClaimable(adminAddr);
-        // console.log(rewards[0],rewards[1]);
-        expect(rewards[1]).eq(currTotalRewards1 - delegatorExpectRewards);
+        const rewards = await validator.anyClaimable(currTotalRewards1,adminAddr);
+        expect(rewards).eq(currTotalStake - delta - delegatorExpectRewards );
 
-        await expect(validator.validatorClaimAny(adminAddr)).to
+        await expect(validator.validatorClaimAny(adminAddr,{value: currTotalRewards1})).to
             .emit(validator, "RewardsWithdrawn")
-            .withArgs(vaddr, adminAddr, rewards[1]);
+            .withArgs(vaddr, adminAddr, rewards - delta);
         // the delegator has half currTotalRewards as staking rewards
         
         expect(await validator.testGetClaimableUnbound(vaddr)).eq(0);
 
-        // await expect(validator.subStake(delta,false)).to
-        // .emit(validator, "StakesChanged")
-        // .withArgs(vaddr, adminAddr, currTotalStake - delta - delta);
+        await expect(validator.subStake(delta,false)).to
+        .emit(validator, "StakesChanged")
+        .withArgs(vaddr, adminAddr, currTotalStake - delta - delta);
 
-        // expect(await validator.testGetClaimableUnbound(vaddr)).eq(0);
+        expect(await validator.testGetClaimableUnbound(vaddr)).eq(0);
         
     });
 
@@ -307,30 +298,30 @@ describe("Validator independent test", function () {
 
         let delegatorExpectRewards = currTotalRewards1 - valExpectRewards;
         delegatorExpectRewards = delegatorExpectRewards / BigInt(1000000) *  BigInt(1000000);
-        await validator.receiveFee({value:currTotalRewards1});
+        // await validator.receiveFee({value:currTotalRewards1});
 
         let selfStake = await validator.selfStake();
         // console.log(selfStake);
 
         expect(await validator.testGetClaimableUnbound(vaddr)).eq(0);
-        const account1 = await validator.anyClaimable(delegator)
-        expect(account1[1]).eq(delegatorExpectRewards);
+        const account1 = await validator.anyClaimable(currTotalRewards1,delegator)
+        expect(account1).eq(delegatorExpectRewards);
 
-        const rewards = await validator.anyClaimable(adminAddr);
-        expect(rewards[1]).eq(currTotalRewards1 - delegatorExpectRewards);
+        const rewards = await validator.anyClaimable(currTotalRewards1,adminAddr);
+        expect(rewards).eq(currTotalRewards1 - delegatorExpectRewards);
 
-        await expect(validator.validatorClaimAny(adminAddr)).to
+        await expect(validator.validatorClaimAny(adminAddr,{value:currTotalRewards1})).to
             .emit(validator, "RewardsWithdrawn")
-            .withArgs(vaddr, adminAddr, rewards[1]);
+            .withArgs(vaddr, adminAddr, rewards);
         // the delegator has half currTotalRewards as staking rewards
         
         expect(await validator.testGetClaimableUnbound(vaddr)).eq(0);
 
-        // await expect(validator.subStake(delta,false)).to
-        // .emit(validator, "StakesChanged")
-        // .withArgs(vaddr, adminAddr, currTotalStake - delta - delta);
+        await expect(validator.subStake(delta,false)).to
+        .emit(validator, "StakesChanged")
+        .withArgs(vaddr, adminAddr, currTotalStake - delta - delta);
 
-        // expect(await validator.testGetClaimableUnbound(vaddr)).eq(0);
+        expect(await validator.testGetClaimableUnbound(vaddr)).eq(0);
         
     });
 
@@ -345,9 +336,9 @@ describe("Validator independent test", function () {
 
         expect(await validator.testGetClaimableUnbound(delegator)).eq(0);
 
-        await validator.receiveFee({value:settledRewards});
+        // await validator.receiveFee({value:settledRewards});
 
-        await expect(validator.subDelegation(delta, delegator,true)).to
+        await expect(validator.subDelegation(delta, delegator,true,{value:settledRewards})).to
             .emit(validator, "StakesChanged")
             .withArgs(vaddr, delegator, currTotalStake - delta);
             
@@ -358,24 +349,24 @@ describe("Validator independent test", function () {
         // and it can't share the later rewards
         let delegatorExpectRewards = settledRewards / BigInt(4);
 
-        const rewardsD = await validator.anyClaimable(delegator);
+        const rewardsD = await validator.anyClaimable(settledRewards,delegator);
 
-        expect(rewardsD[1]).eq(delegatorExpectRewards);
+        expect(rewardsD).eq(delegatorExpectRewards);
 
-        await validator.receiveFee({value:settledRewards});
+        // await validator.receiveFee({value:settledRewards});
 
-        const rewardsV = await validator.anyClaimable(adminAddr);
+        const rewardsV = await validator.anyClaimable(settledRewards,adminAddr);
 
-        expect(rewardsV[1]).eq(settledRewards * BigInt(2) - delegatorExpectRewards);
+        expect(rewardsV).eq(settledRewards * BigInt(2) - delegatorExpectRewards);
 
         // double rewards ==> commission: 2m, validator: 500k + 1m = 1.5m , that is 7/8 of total rewards, delegator: 500k + 0 = 500k, 1/8 total rewards
         let validatorExpectRewards = settledRewards * BigInt(2*7) / BigInt(8)
-        await expect(validator.validatorClaimAny(adminAddr)).to
+        await expect(validator.validatorClaimAny(adminAddr,{value:settledRewards})).to
             .emit(validator, "RewardsWithdrawn")
             .withArgs(vaddr, adminAddr, validatorExpectRewards);
 
-        const rewardsD1 = await validator.anyClaimable(delegator);
-        expect(rewardsD1[1]).eq(delegatorExpectRewards);
+        const rewardsD1 = await validator.anyClaimable(settledRewards,delegator);
+        expect(rewardsD1).eq(delegatorExpectRewards);
 
         await expect(validator.delegatorClaimAny(delegator)).to
             .emit(validator, "RewardsWithdrawn")
@@ -394,44 +385,44 @@ describe("Validator independent test", function () {
 
         expect(await validator.testGetClaimableUnbound(delegator)).eq(0);
 
-        await validator.receiveFee({value:settledRewards});
+        // await validator.receiveFee({value:settledRewards});
 
         const newDlg0 = await validator.delegators(delegator);
-        
-        // console.log(newDlg0);
+ 
+        const totalS = await validator.totalStake();
+    
 
-        await expect(validator.subDelegation(delta, delegator, false)).to
+        await expect(validator.subDelegation(delta, delegator, false,{value:settledRewards})).to
             .emit(validator, "StakesChanged")
             .withArgs(vaddr, delegator, currTotalStake - delta);
             
         expect(await validator.testGetClaimableUnbound(delegator)).eq(0);
        const newDlg = await validator.delegators(delegator);
         
-        // console.log(newDlg);
+    
 
         // currently ,the delegator should has 1/4 of settledRewards;
         // and it can't share the later rewards
         let delegatorExpectRewards = settledRewards / BigInt(4);
 
-        const rewardsD = await validator.anyClaimable(delegator);
+        const rewardsD = await validator.anyClaimable(settledRewards,delegator);
 
-        expect(rewardsD[1]).eq(delegatorExpectRewards);
+        expect(rewardsD).eq(0);
 
-        await validator.receiveFee({value:settledRewards});
+        // await validator.receiveFee({value:settledRewards});
 
-        const rewardsV = await validator.anyClaimable(adminAddr);
+        const rewardsV = await validator.anyClaimable(settledRewards,adminAddr);
 
-        expect(rewardsV[1]).eq(settledRewards * BigInt(2) - delegatorExpectRewards);
+        expect(rewardsV).eq(settledRewards * BigInt(2) - delegatorExpectRewards);
 
         // double rewards ==> commission: 2m, validator: 500k + 1m = 1.5m , that is 7/8 of total rewards, delegator: 500k + 0 = 500k, 1/8 total rewards
         let validatorExpectRewards = settledRewards * BigInt(2*7) / BigInt(8)
-        await expect(validator.validatorClaimAny(adminAddr)).to
+        await expect(validator.validatorClaimAny(adminAddr,{value:settledRewards})).to
             .emit(validator, "RewardsWithdrawn")
             .withArgs(vaddr, adminAddr, validatorExpectRewards);
 
-        const rewardsD1 = await validator.anyClaimable(delegator);
-        expect(rewardsD1[1]).eq(delegatorExpectRewards);
-
+        const rewardsD1 = await validator.anyClaimable(settledRewards,delegator);
+        expect(rewardsD1).eq(0);
         await expect(validator.delegatorClaimAny(delegator)).to
             .emit(validator, "RewardsWithdrawn")
             .withArgs(vaddr, delegator, delegatorExpectRewards);
@@ -443,32 +434,24 @@ describe("Validator independent test", function () {
         let oldSelfStake = await validator.selfStake();
         let sendRewards = currTotalStake * BigInt(2);
 
-        let oldAccRewardsPerStake = BigInt(0);
+        let oldAccRewardsPerStake = await validator.accRewardsPerStake();
         let receivedRewards = TestHandleReceivedRewards(sendRewards, oldAccRewardsPerStake, commissionRate, oldTotalStake)
         let accRewardsPerStake = receivedRewards.accRewardsPerStake;
         let currCommission = receivedRewards.currCommission;
 
-        expect(await validator.state()).eq(State.Ready);
-        await validator.receiveFee({value:sendRewards});
-        
-        await expect(validator.exitStaking(
-            // {value: sendRewards}
-            )).to
+        expect(await validator.state()).eq(State.Idle);
+        await expect(validator.exitStaking({value: sendRewards})).to
             .emit(validator, "StateChanged")
-            .withArgs(vaddr, adminAddr, State.Ready, State.Exit);
-        
+            .withArgs(vaddr, adminAddr, State.Idle, State.Exit);
         expect(await validator.state()).eq(State.Exit);
-        expect(await validator.totalStake()).eq(oldTotalStake - oldSelfStake);
-        //expect(await validator.accRewardsPerStake()).eq(accRewardsPerStake);
-        //expect(await validator.currCommission()).eq(currCommission);
+        expect(await validator.totalStake()).eq(oldTotalStake -oldSelfStake);
+        expect(await validator.accRewardsPerStake()).eq(accRewardsPerStake);
+        expect(await validator.currCommission()).eq(currCommission);
         expect(await validator.selfStake()).eq(0);
-        
 
         let dlg = await validator.delegators(delegator);
-        // console.log(dlg);
         let oldStake = dlg.stake;
-        // console.log(oldStake)
-        await expect(validator.delegatorClaimAny(delegator)).to
+        await expect(validator.delegatorClaimAny(delegator, {value: 0})).to
             .emit(validator, "RewardsWithdrawn")
             .withArgs(vaddr, delegator, oldStake);
         dlg = await validator.delegators(delegator);
@@ -477,8 +460,8 @@ describe("Validator independent test", function () {
 
     it('4. exitDelegation with correct rewards calculation', async () => {
         let oldTotalStake = await validator.totalStake();
-        let sendRewards = currTotalStake * BigInt(2);
-        let oldAccRewardsPerStake = BigInt(0);
+        let sendRewards = currTotalStake *BigInt(2);
+        let oldAccRewardsPerStake = await validator.accRewardsPerStake();
         let receivedRewards = TestHandleReceivedRewards(sendRewards, oldAccRewardsPerStake, commissionRate, oldTotalStake)
         let accRewardsPerStake = receivedRewards.accRewardsPerStake;
         let currCommission = receivedRewards.currCommission;
@@ -489,23 +472,15 @@ describe("Validator independent test", function () {
         let oldPendingUnbound = await validator.testGetClaimableUnbound(delegator);
         expect(oldPendingUnbound).eq(0);
 
-        await validator.receiveFee({value:sendRewards});
-        const newDlg0 = await validator.delegators(delegator);
-        
-        // console.log(newDlg0);
-
-        await expect(validator.exitDelegation(delegator)).to
+        await expect(validator.exitDelegation(delegator, {value: sendRewards})).to
             .emit(validator, "StakesChanged")
             .withArgs(vaddr, delegator, oldTotalStake - oldStake);
-        //expect(await validator.accRewardsPerStake()).eq(accRewardsPerStake);
-        //expect(await validator.currCommission()).eq(currCommission);
+        expect(await validator.accRewardsPerStake()).eq(accRewardsPerStake);
+        expect(await validator.currCommission()).eq(currCommission);
         expect(await validator.totalStake()).eq(oldTotalStake - oldStake);
 
-  
         let newDlg = await validator.delegators(delegator);
-        // console.log(newDlg)
-
-        expect(newDlg.settled).eq(oldStake * accRewardsPerStake * E18);
+        expect(newDlg.settled).eq(oldStake * accRewardsPerStake);
         expect(newDlg.stake).eq(0);
 
         //console.log(await validator.getPendingUnboundRecord(delegator, 0));
@@ -513,11 +488,10 @@ describe("Validator independent test", function () {
         expect(newPendingUnbound).eq(oldStake);
 
         dlg = await validator.delegators(delegator);
-        
-        let claimable = accRewardsPerStake * dlg.stake + dlg.settled - dlg.debt ;
-        await expect(validator.delegatorClaimAny(delegator)).to
+        let claimable = accRewardsPerStake * dlg.stake + dlg.settled - dlg.debt;
+        await expect(validator.delegatorClaimAny(delegator, {value: 0})).to
             .emit(validator, "RewardsWithdrawn")
-            .withArgs(vaddr, delegator, claimable / E18);
+            .withArgs(vaddr, delegator, claimable / utils.ethToWei(params.StakeUnit.toString()));
         expect(await validator.testGetClaimableUnbound(delegator)).eq(0);
     });
 
@@ -525,19 +499,19 @@ describe("Validator independent test", function () {
         expect(await validator.totalStake()).eq(currTotalStake);
         expect(await validator.testGetClaimableUnbound(vaddr)).eq(0);
 
-        let delta = utils.ethToWei("100000"); // 100000000000000 wei
+        let delta = utils.ethToGwei("100000"); // 100000000000000 wei
         await expect(validator.subStake(delta,true)).to
             .emit(validator, "StakesChanged")
             .withArgs(vaddr, adminAddr, currTotalStake - delta);
 
         expect(await validator.testGetClaimableUnbound(vaddr)).eq(delta);
-
+        
         await expect(validator.subStake(delta,true)).to
             .emit(validator, "StakesChanged")
             .withArgs(vaddr, adminAddr, currTotalStake - delta * BigInt(2));
 
-        expect(await validator.testGetClaimableUnbound(vaddr)).eq(delta* BigInt(2));
-
+        expect(await validator.testGetClaimableUnbound(vaddr)).eq(delta * BigInt(2));
+        
         await expect(validator.subStake(delta,true)).to
             .emit(validator, "StakesChanged")
             .withArgs(vaddr, adminAddr, currTotalStake - delta * BigInt(3));
@@ -546,84 +520,55 @@ describe("Validator independent test", function () {
         // and then settle rewards , set rewards to 2 * 900k
         let currTotalRewards = currTotalStake - delta * BigInt(2);
         // validator commission: 50% ==> 900k
-        // validator rewards 2/7 ==> 400k
-        // delegator rewards 5/7 ==> 500k
+        // validator rewards 4/9 ==> 400k
+        // delegator rewards 5/9 ==> 500k
         let valExpectRewards = currTotalRewards / BigInt(14) * BigInt(9);
-        let delegatorExpectRewards = currTotalRewards - valExpectRewards ;
+        let delegatorExpectRewards = currTotalRewards - valExpectRewards;
+
         delegatorExpectRewards = delegatorExpectRewards / BigInt(1000000) *  BigInt(1000000);
         valExpectRewards = currTotalRewards - delegatorExpectRewards;
-
-        expect(await validator.testGetClaimableUnbound(vaddr)).eq(delta* BigInt(3));
-
-        await validator.receiveFee({value:currTotalRewards});
-        
-        const amountV = await validator.anyClaimable(adminAddr);
-        expect(amountV[1]).eq(valExpectRewards);
-        expect(amountV[0]).eq(delta * BigInt(3));
-
-        await expect(validator.validatorClaimAny(adminAddr)).to
+        expect(await validator.testGetClaimableUnbound(vaddr)).eq(delta * BigInt(3));
+        expect(await validator.anyClaimable(currTotalRewards, adminAddr)).eq(valExpectRewards + delta * BigInt(3));
+        await expect(validator.validatorClaimAny(adminAddr, {value: currTotalRewards})).to
             .emit(validator, "RewardsWithdrawn")
             .withArgs(vaddr, adminAddr, valExpectRewards);
         // the delegator has half currTotalRewards as staking rewards
-        const amountD = await validator.anyClaimable(delegator)
-        expect(amountD[1]).eq(delegatorExpectRewards);
+        expect(await validator.anyClaimable(0, delegator)).eq(delegatorExpectRewards);
         expect(await validator.testGetClaimableUnbound(vaddr)).eq(0);
     });
 
     it('6. SubDelegation executes multiple times in a row', async () => {
         let delta = utils.ethToWei("50000");
         // currTotalRewards 2m
-        let oldTotalStake = await validator.totalStake();
         let settledRewards = currTotalStake * BigInt(2);
-
         expect(await validator.testGetClaimableUnbound(delegator)).eq(0);
-        let oldAccRewardsPerStake = BigInt(0);
 
-        // let receivedRewards0 = TestHandleReceivedRewards(settledRewards, oldAccRewardsPerStake, commissionRate, oldTotalStake);
-        // let accRewardsPerStake0 = receivedRewards0.accRewardsPerStake;
-        // let currCommission0 = receivedRewards0.currCommission;
-
-        await validator.receiveFee({value:settledRewards});
-
-        await expect(validator.subDelegation(delta, delegator, true)).to
+        await expect(validator.subDelegation(delta, delegator,false, {value: settledRewards})).to
             .emit(validator, "StakesChanged")
             .withArgs(vaddr, delegator, currTotalStake - delta);
-        expect(await validator.testGetClaimableUnbound(delegator)).eq(delta);
+        expect(await validator.testGetClaimableUnbound(delegator)).eq(0);
 
-        // let receivedRewards1  = TestHandleReceivedRewards(settledRewards, accRewardsPerStake0, commissionRate, oldTotalStake);
-        // let accRewardsPerStake1 = receivedRewards1.accRewardsPerStake;
-        // let currCommission1 = receivedRewards1.currCommission;
-
-        // await validator.receiveFee({value:settledRewards});
-        await expect(validator.subDelegation(delta, delegator,true)).to
+        await expect(validator.subDelegation(delta, delegator,false, {value: settledRewards})).to
             .emit(validator, "StakesChanged")
             .withArgs(vaddr, delegator, currTotalStake - delta * BigInt(2));
-        expect(await validator.testGetClaimableUnbound(delegator)).eq(delta * BigInt(2));
-        // let receivedRewards2  = TestHandleReceivedRewards(settledRewards, accRewardsPerStake1, commissionRate, oldTotalStake);
-        // let accRewardsPerStake2 = receivedRewards2.accRewardsPerStake;
-        // let currCommission2 = receivedRewards2.currCommission;
+        expect(await validator.testGetClaimableUnbound(delegator)).eq(0);
 
-        // await validator.receiveFee({value:settledRewards});
-        await expect(validator.subDelegation(delta, delegator,true)).to
+        await expect(validator.subDelegation(delta, delegator, false, {value: settledRewards})).to
             .emit(validator, "StakesChanged")
             .withArgs(vaddr, delegator, currTotalStake - delta * BigInt(3));
-        expect(await validator.testGetClaimableUnbound(delegator)).eq(delta * BigInt(3));
+        expect(await validator.testGetClaimableUnbound(delegator)).eq(0);
 
-        let receivedRewards3  = TestHandleReceivedRewards(settledRewards, oldAccRewardsPerStake, commissionRate, oldTotalStake);
-        let accRewardsPerStake3 = receivedRewards3.accRewardsPerStake;
-        let currCommission3 = receivedRewards3.currCommission;
-        // let accRewardsPerStake = await validator.accRewardsPerStake();
+        let accRewardsPerStake = await validator.accRewardsPerStake();
         let dlg = await validator.delegators(delegator);
-
-        let claimable = accRewardsPerStake3 * dlg.stake + dlg.settled / E18 - dlg.debt;
-        await expect(validator.delegatorClaimAny(delegator)).to
+        let claimable = accRewardsPerStake * dlg.stake + dlg.settled - dlg.debt;
+        await expect(validator.delegatorClaimAny(delegator, {value: 0})).to
             .emit(validator, "RewardsWithdrawn")
-            .withArgs(vaddr, delegator, claimable);
+            .withArgs(vaddr, delegator,  claimable / utils.ethToWei(params.StakeUnit.toString()));
         expect(await validator.testGetClaimableUnbound(delegator)).eq(0);
     });
 })
 
-describe("Validator punish test", function () {
+describe("Validator pushing test", function () {
     let signers
     let owner
     let factory
@@ -648,57 +593,52 @@ describe("Validator punish test", function () {
         adminAddr = adminSigner.address;
         delegator = signers[3].address;
 
-        factory = await hre.ethers.getContractFactory("cache/solpp-generated-contracts/builtin/Validator.sol:Validator", owner);
+        factory = await hre.ethers.getContractFactory("cache/solpp-generated-contracts/Validator.sol:Validator", owner);
         validator = await factory.deploy(vaddr, adminAddr, commissionRate, stake, true, State.Idle);
         await validator.addDelegation(stake, delegator);
-        currTotalStake = stake * BigInt(2);
+        currTotalStake = stake* BigInt(2);
     });
 
     it('1. punish with correct rewards calculation', async () => {
         let oldTotalStake = await validator.totalStake();
-        let sendRewards = currTotalStake * BigInt(2);
-        let oldAccRewardsPerStake = BigInt(0);
+        let sendRewards = currTotalStake* BigInt(2);
+        let oldAccRewardsPerStake = await validator.accRewardsPerStake();
         let receivedRewards = TestHandleReceivedRewards(sendRewards, oldAccRewardsPerStake, commissionRate, oldTotalStake)
         let accRewardsPerStake = receivedRewards.accRewardsPerStake;
         let currCommission = receivedRewards.currCommission;
-
         let oldTotalUnWithdrawn = await validator.totalUnWithdrawn();
-        let oldSelfStake = await validator.selfStake();
+        let oldSelfstake = await validator.selfStake();
         let oldPendingUnbound = await validator.testGetClaimableUnbound(vaddr);
-        let oldSelfUnWithdrawn = oldSelfStake + oldPendingUnbound;
+        let oldSelfUnWithdrawn = oldSelfstake + oldPendingUnbound;
         let oldAccPunishFactor = await validator.accPunishFactor();
         //console.log(await utils.getLatestCoinbase());
-        await validator.receiveFee({value:sendRewards});
-
-        await expect(validator.punish(params.EvilPunishFactor)).to
+        await expect(validator.punish(params.EvilPunishFactor, {value: sendRewards})).to
             .emit(validator, "StateChanged")
-            .withArgs(vaddr, "0xC014BA5EC014ba5ec014Ba5EC014ba5Ec014bA5E", State.Ready, State.Jail);
+            .withArgs(vaddr, "0xC014BA5EC014ba5ec014Ba5EC014ba5Ec014bA5E", State.Idle, State.Jail);
 
-        let slashAmount = oldTotalUnWithdrawn * utils.ethToWei(params.EvilPunishFactor) / utils.ethToWei(params.PunishBase);
-
+        let slashAmount = oldTotalUnWithdrawn * BigInt(params.EvilPunishFactor) /BigInt(params.PunishBase);
         let newTotalUnWithdrawn = await validator.totalUnWithdrawn();
         expect(newTotalUnWithdrawn).eq(oldTotalUnWithdrawn - slashAmount);
 
-        let selfSlashAmount = oldSelfUnWithdrawn * utils.ethToWei(params.EvilPunishFactor) / utils.ethToWei(params.PunishBase);
-
-        let newSelfStake = 0;
+        let selfSlashAmount = oldSelfUnWithdrawn * BigInt(params.EvilPunishFactor) / BigInt(params.PunishBase);
+        let newSelfstake = 0;
         let newPendingUnbound = 0;
-        if (oldSelfStake >= selfSlashAmount) {
-            newSelfStake = oldSelfStake - selfSlashAmount;
+        if (oldSelfstake >= selfSlashAmount) {
+            newSelfstake = oldSelfstake - selfSlashAmount;
         } else {
-            let debt = selfSlashAmount - oldSelfStake;
+            let debt = selfSlashAmount - oldSelfstake;
             if (newPendingUnbound >= debt) {
                 newPendingUnbound = oldPendingUnbound - debt;
             } else {
                 newPendingUnbound = 0;
             }
-            newSelfStake = 0;
+            newSelfstake = 0;
         }
         expect(await validator.testGetClaimableUnbound(vaddr)).eq(newPendingUnbound);
-        expect(await validator.selfStake()).eq(newSelfStake);
-        expect(await validator.accPunishFactor()).eq(oldAccPunishFactor + params.EvilPunishFactor);
-        //expect(await validator.accRewardsPerStake()).eq(accRewardsPerStake);
-        //expect(await validator.currCommission()).eq(currCommission);
+        expect(await validator.selfStake()).eq(newSelfstake);
+        expect(await validator.accPunishFactor()).eq(oldAccPunishFactor + BigInt(params.EvilPunishFactor));
+        expect(await validator.accRewardsPerStake()).eq(accRewardsPerStake);
+        expect(await validator.currCommission()).eq(currCommission);
     });
 
     it('2. calcDelegatorPunishment with correct rewards calculation', async () => {
@@ -706,41 +646,39 @@ describe("Validator punish test", function () {
         let dlg = await validator.delegators(delegator);
         expect(dlg.punishFree).eq(0);
         let oldPendingUnbound = await validator.testGetClaimableUnbound(vaddr)
-        let deltaFactor = accPunishFactor - dlg.punishFree ;
+        let deltaFactor = accPunishFactor - dlg.punishFree;
         let totalDelegation = dlg.stake + oldPendingUnbound ;
         let amount = totalDelegation * deltaFactor / BigInt(params.PunishBase);
         expect(await validator.testCalcDelegatorPunishment(delegator)).eq(amount);
     });
 
     it('3. Create test data for addunboundrecord in advance', async () => {
-        let delta = utils.ethToWei("50000");
+        let delta = utils.ethToGwei("50000");
         // currTotalRewards 2m
-        let settledRewards = currTotalStake * BigInt(2);
+        let settledRewards = currTotalStake* BigInt(2);
         expect(await validator.testGetClaimableUnbound(delegator)).eq(0);
-        await validator.receiveFee({value:settledRewards});
 
-        await expect(validator.subDelegation(delta, delegator,true)).to
+        await expect(validator.subDelegation(delta, delegator, {value: settledRewards})).to
             .emit(validator, "StakesChanged")
-            .withArgs(vaddr, delegator, currTotalStake - delta );
+            .withArgs(vaddr, delegator, currTotalStake - delta);
         expect(await validator.testGetClaimableUnbound(delegator)).eq(delta);
 
-        await expect(validator.subDelegation(delta, delegator, true)).to
+        await expect(validator.subDelegation(delta, delegator, {value: settledRewards})).to
             .emit(validator, "StakesChanged")
             .withArgs(vaddr, delegator, currTotalStake - delta * BigInt(2));
-        expect(await validator.testGetClaimableUnbound(delegator)).eq(delta * BigInt(2));
+        expect(await validator.testGetClaimableUnbound(delegator)).eq(delta* BigInt(2));
 
-        await expect(validator.subDelegation(delta, delegator,true)).to
+        await expect(validator.subDelegation(delta, delegator, {value: settledRewards})).to
             .emit(validator, "StakesChanged")
-            .withArgs(vaddr, delegator, currTotalStake- delta * BigInt(3));
-
+            .withArgs(vaddr, delegator, currTotalStake - delta * BigInt(3));
         expect(await validator.testGetClaimableUnbound(delegator)).eq(delta * BigInt(3));
 
         let dlg = await validator.delegators(delegator);
         let oldStake = dlg.stake;
         let oldTotalStake = await validator.totalStake();
-        let sendRewards = currTotalStake * BigInt(3);
+        let sendRewards = currTotalStake * BigInt(2);
 
-        await expect(validator.exitDelegation(delegator)).to
+        await expect(validator.exitDelegation(delegator, {value: sendRewards})).to
             .emit(validator, "StakesChanged")
             .withArgs(vaddr, delegator, oldTotalStake - oldStake);
 
@@ -752,7 +690,7 @@ describe("Validator punish test", function () {
         let amountUnboundDiv5 = amountUnbound / BigInt(5);
         for (let i = 1; i <= 5; i ++) {
             await validator.testSlashFromUnbound(delegator, amountUnboundDiv5);
-            expect(await validator.testGetClaimableUnbound(delegator)).eq(amountUnbound - amountUnboundDiv5 * BigInt(5));
+            expect(await validator.testGetClaimableUnbound(delegator)).eq(amountUnbound - amountUnboundDiv5 * BigInt(i));
         }
         expect(await validator.testGetClaimableUnbound(delegator)).eq(0);
         await validator.testSlashFromUnbound(delegator, amountUnboundDiv5);
@@ -766,6 +704,7 @@ describe("Validator punish test", function () {
 })
 
 function TestHandleReceivedRewards(sendRewards, oldAccRewardsPerStake, commissionRate, oldTotalStake) {
+    sendRewards = utils.ethToWei(sendRewards.toString())
     let c = sendRewards * BigInt(commissionRate) / BigInt(100);
     let newRewards = sendRewards - c;
     let rps = newRewards / oldTotalStake;
