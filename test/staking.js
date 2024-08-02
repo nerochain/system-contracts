@@ -666,63 +666,54 @@ describe("Staking test", function () {
         await expect(staking20.addStake(signer20.address, {value:diffWei / BigInt(2)})).to.be.revertedWith("E28");
     });
 
-    it('16. check exitStaking', async () => {
-        // locking == true && Jail
+    it('16. check exitDelegation', async () => {
+        let diffWei = utils.ethToWei((params.ThresholdStakes - params.MinSelfStakes).toString());
+        // Jail
         let signer2 = signers[2];
         let admin2 = signers[27];
-        // locking == true
+        // Exit
         let signer20 = signers[20];
         let admin20 = signers[45];
+        // Idle
+        let signer50 = signers[51];
+        let admin50 = signers[52];
 
-        let staking2 = staking.connect(admin2);
-        await expect(staking2.exitStaking(signer2.address)).to.be.revertedWith("E32");
+        let delegator = signers[53];
+        let stakingDelegator = staking.connect(delegator);
 
-        let staking20 = staking.connect(admin20);
-        await expect(staking20.exitStaking(signer20.address)).to.be.revertedWith("E32");
+        // Add some data in advance
+        await expect(stakingDelegator.addDelegation(signer2.address, {value: diffWei / BigInt(2)})).to.be.revertedWith("E28");
+        await expect(stakingDelegator.addDelegation(signer20.address, {value: diffWei/ BigInt(2)})).to.be.revertedWith("E28");
 
-        // Forced arrival at the end of the lock period
-        tx = await staking.testReduceBasicLockEnd(params.releasePeriod * params.releaseCount);
+        tx = await stakingDelegator.addDelegation(signer50.address, {value: diffWei / BigInt(2)});
         receipt = await tx.wait();
         expect(receipt.status).equal(1);
 
         // Jail
-        staking2 = staking.connect(admin2);
-        tx = await staking2.exitStaking(signer2.address);
-        receipt = await tx.wait();
-        expect(receipt.status).equal(1);
-
-        valContractAddr = await staking.valMaps(signer2.address);
-        valContract = valFactory.attach(valContractAddr);
-        await expect(tx).to
-            .emit(valContract,"StateChanged")
-            .withArgs(signer2.address, admin2.address, State.Jail, State.Exit)
-
-        // Initialize some data in advance to verify the delegatorClaimAny
-        let delegator = signers[53];
-        let diffGwei = utils.ethToGwei(params.ThresholdStakes - params.MinSelfStakes);
-        let diffWei = utils.ethToWei(params.ThresholdStakes - params.MinSelfStakes);
-        valContractAddr = await staking.valMaps(signer20.address);
-        valContract = valFactory.attach(valContractAddr);
-        let oldValTotalStake = await valContract.totalStake();
-
-        let stakingDelegator = staking.connect(delegator);
-        tx = await stakingDelegator.addDelegation(signer20.address, {value: diffWei.div(2)});
-        receipt = await tx.wait();
-        expect(receipt.status).equal(1);
-        await expect(tx).to
-            .emit(valContract,"StakeChanged")
-            .withArgs(signer20.address, delegator.address, oldValTotalStake.add(diffGwei.div(2)))
+        await expect(stakingDelegator.exitDelegation(signer2.address)).to.be.revertedWith("E28");
+        // Exit
+        await expect(stakingDelegator.exitDelegation(signer20.address)).to.be.revertedWith("E28");
 
         // Idle
-        staking20 = staking.connect(admin20);
-        tx = await staking20.exitStaking(signer20.address);
+        tx = await stakingDelegator.exitDelegation(signer50.address);
+        receipt = await tx.wait();
+        expect(receipt.status).equal(1);
+
+        valContractAddr = await staking.valMaps(signer50.address);
+        valContract = valFactory.attach(valContractAddr);
+        const totals = await valContract.totalStake();
+        await expect(tx).to
+            .emit(valContract,"StakesChanged")
+            .withArgs(signer50.address, delegator.address, totals)
+
+        // locking == false
+        let staking50 = staking.connect(admin50);
+        tx = await staking50.exitStaking(signer50.address);
         receipt = await tx.wait();
         expect(receipt.status).equal(1);
         await expect(tx).to
             .emit(valContract,"StateChanged")
-            .withArgs(signer20.address, admin20.address, State.Ready, State.Exit)
-
-        await expect(staking20.addStake(signer20.address, {value: diffWei.div(2)})).to.be.revertedWith("E28");
+            .withArgs(signer50.address, admin50.address, State.Idle, State.Exit)
     });
 
     it('17. check reStaking', async () => {
@@ -750,11 +741,8 @@ describe("Staking test", function () {
 
         // console.log("oldValTotalStake5", oldValTotalStake);
 
-        await btr.connect(account5).transfer(admin5.address, params.singleValStake);
-        // console.log(await btr.balanceOf(admin5.address));
-        await btr.connect(admin5).approve(staking.target, params.singleValStake);
 
-        await staking.connect(admin5).addStake(signer5.address, diffWei * BigInt(2));
+        await staking.connect(admin5).addStake(signer5.address, {value: diffWei * BigInt(2)});
 
         let valTotalStake = await valContract.totalStake();
 
@@ -767,24 +755,20 @@ describe("Staking test", function () {
         await staking.distributeBlockFee({ value: blockFee });
 
         // old val exit
-        await expect(staking.connect(admin20).reStaking(signer20.address, signer50.address, diffWei)).to.be.revertedWith("E28");
+        await expect(staking.connect(admin20).reStaking(signer20.address, signer50.address, diffWei)).to.be.revertedWith("E24");
         // new val exit
 
         await expect(staking.connect(admin5).reStaking(signer5.address, signer20.address, diffWei)).to.be.revertedWith("E28");
 
-        await expect(staking.connect(admin2).reStaking(signer2.address, signer50.address, diffWei)).to.be.revertedWith("E28");
+        await expect(staking.connect(admin2).reStaking(signer2.address, signer50.address, diffWei)).to.be.revertedWith("E35");
 
         let rewards = await staking.anyClaimable(signer5.address, admin5.address);
 
         // console.log(rewards);
 
-        const beforeAmount = await btr.balanceOf(admin5.address);
-        const beforeStaking = await btr.balanceOf(staking.target);
+
         let tx = await staking.connect(admin5).reStaking(signer5.address, signers[16].address, diffWei);
-        const AfterAmount = await btr.balanceOf(admin5.address);
-        const afterStaking = await btr.balanceOf(staking.target);
-        expect(beforeStaking - afterStaking).to.be.equal(0);
-        expect((beforeAmount - AfterAmount)).to.be.equal(0);
+
         await expect(tx).to
             .emit(staking, "TotalStakeChanged")
             .withArgs(signer5.address, oldtotalStake, oldtotalStake - diffWei);
@@ -825,11 +809,8 @@ describe("Staking test", function () {
 
         // console.log("oldValTotalStake5", oldValTotalStake);
 
-        await btr.connect(account5).transfer(admin5.address, params.singleValStake);
-        // console.log(await btr.balanceOf(admin5.address));
-        await btr.connect(admin5).approve(staking.target, params.singleValStake);
 
-        await staking.connect(admin5).addDelegation(signers[14].address, diffWei * BigInt(2));
+        await staking.connect(admin5).addDelegation(signers[14].address, {value:diffWei * BigInt(2)});
 
         let valTotalStake = await valContract.totalStake();
 
@@ -842,12 +823,12 @@ describe("Staking test", function () {
         await staking.distributeBlockFee({ value: blockFee });
 
         // old val exit
-        await expect(staking.connect(admin20).reDelegation(signer20.address, signer50.address, diffWei)).to.be.revertedWith("E28");
+        await expect(staking.connect(admin20).reDelegation(signer20.address, signer50.address, diffWei)).to.be.revertedWith("E36");
         // new val exit
 
         await expect(staking.connect(admin5).reDelegation(signers[14].address, signer20.address, diffWei)).to.be.revertedWith("E28");
 
-        await expect(staking.connect(admin2).reDelegation(signers[14].address, signer50.address, diffWei)).to.be.revertedWith("E24");
+        await expect(staking.connect(admin2).reDelegation(signers[14].address, signer50.address, diffWei)).to.be.revertedWith("E36");
 
         let rewards = await staking.anyClaimable(signer5.address, admin5.address);
 
