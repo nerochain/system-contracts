@@ -20,7 +20,6 @@ describe("GenesisLock contract test", function () {
     let account4;
     let account5;
     let lock;
-    let mockAccount;
 
     let periodTime = 50;
     let lockTime = 50;
@@ -37,13 +36,11 @@ describe("GenesisLock contract test", function () {
 
 
         LockingContract = await hre.ethers.getContractFactory("cache/solpp-generated-contracts/GenesisLock.sol:GenesisLock");
-        MockAccount = await hre.ethers.getContractFactory("cache/solpp-generated-contracts/mock/MockAccount.sol:MockAccount")
         const nonce = await owner.getNonce();
         console.log("nonce:",nonce);
         const from = owner.address.toString();
         contractAddress = ethers.getCreateAddress({from,nonce});
         lock = await LockingContract.deploy();
-        mockAccount = await MockAccount.deploy(lock.target);
         // snapshotId = await utils.takeSnapshot();
         // console.log(snapshotId);
     });
