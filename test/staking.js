@@ -242,8 +242,8 @@ describe("Staking test", function () {
         // let receipt = await tx.wait();
         // expect(receipt.status).to.eq(1);
         let number = await ethers.provider.getBlockNumber();
-        // let stakeGwei = utils.ethToGwei(params.singleValStakeEth);
-        // let totalStakeGwei = stakeGwei.mul(3);
+        // let stake = utils.ethToGwei(params.singleValStakeEth);
+        // let totalstake = stake.mul(3);
         const totalStake = await staking.totalStake();
     
         let expectAccRPS = params.rewardsPerBlock * BigInt(number);
@@ -364,16 +364,49 @@ describe("Staking test", function () {
             }
         }
     });
-
-    it('10. Multiple crimes during punishment', async () => {
-        let oldtotalStake = await staking.totalStake();
+    it('10. check doubleSignPunish', async () => {
         let activeValidators = await staking.getActiveValidators();
-        let valAddr = activeValidators[1];
-        let valContractAddr = await staking.valMaps(valAddr);
-        let val = valFactory.attach(valContractAddr);
-        let oldInfo = { stake: await val.totalStake(), unWithdrawn: await val.totalUnWithdrawn() };
+        let val = activeValidators[1];
+
+        let topVals = await staking.getTopValidators(100);
+        let oldInfo = await staking.valInfos(val);
+        let oldTotalStake = await staking.totalStake();
+        let valContractAddr = await staking.valMaps(val);
+        let testPunishHash = "0x47e6e9803bc15fb3fd83a29013a2b264dae9df41fe0272d0fa73f35a727c2f55";
+
+        let tx = await staking.doubleSignPunish(testPunishHash, val);
+        let receipt = await tx.wait();
+        expect(receipt.status).equal(1);
+        expect(await staking.isDoubleSignPunished(testPunishHash)).equal(true);
+
+        let newTopVals = await staking.getTopValidators(100);
+        expect(newTopVals.length).equal(topVals.length - 1);
+        for (let i = 0; i < newTopVals.length; i++) {
+            expect(val !== newTopVals[i]).equal(true);
+        }
+
+        let slashAmount = oldInfo.unWithdrawn * BigInt(params.EvilPunishFactor) / BigInt(params.PunishBase);
+        let amountFromCurrStakes = slashAmount;
+        if (oldInfo.stake < slashAmount) {
+            amountFromCurrStakes = oldInfo.stake;
+        }
+        let newInfo = await staking.valInfos(val);
+        expect(newInfo.stake).to.eq(oldInfo.stake - amountFromCurrStakes );
+        let accRewardsPerStake = await staking.accRewardsPerStake();
+        expect(newInfo.debt).to.eq(accRewardsPerStake * newInfo.stake);
+        expect(newInfo.unWithdrawn).to.eq(oldInfo.unWithdrawn - slashAmount);
+        expect(await staking.totalStake()).to.eq(oldTotalStake - (amountFromCurrStakes));
+
+        await expect(staking.doubleSignPunish(testPunishHash, val)).to.be.revertedWith("E06");
+    });
+
+    it('10.1 Multiple crimes during punishment', async () => {
+        let oldTotalStake = await staking.totalStake();
+        let activeValidators = await staking.getActiveValidators();
+        let val = activeValidators[1];
+        let oldInfo = await staking.valInfos(val);
         for (let i = 0; i < params.LazyPunishThreshold; i++) {
-            let tx = await staking.lazyPunish(valAddr);
+            let tx = await staking.lazyPunish(val);
             let receipt = await tx.wait();
             expect(receipt.status).equal(1);
         }
@@ -382,12 +415,12 @@ describe("Staking test", function () {
         if (oldInfo.stake < slashAmount) {
             amountFromCurrStakes = oldInfo.stake;
         }
-        let newInfo = { stake: await val.totalStake(), unWithdrawn: await val.totalUnWithdrawn() };
-        expect(newInfo.stake).to.eq(oldInfo.stake - BigInt(amountFromCurrStakes));
-        // let accRewardsPerStake = await staking.accRewardsPerStake();
-        // expect(newInfo.debt).to.eq(accRewardsPerStake * newInfo.stake);
-        expect(newInfo.unWithdrawn).to.eq(oldInfo.unWithdrawn - BigInt(slashAmount));
-        expect(await staking.totalStake()).to.eq(oldtotalStake - BigInt(amountFromCurrStakes));
+        let newInfo = await staking.valInfos(val);
+        expect(newInfo.stake).to.eq(oldInfo.stake - amountFromCurrStakes);
+        let accRewardsPerStake = await staking.accRewardsPerStake();
+        expect(newInfo.debt).to.eq(accRewardsPerStake * newInfo.stake);
+        expect(newInfo.unWithdrawn).to.eq(oldInfo.unWithdrawn - slashAmount);
+        expect(await staking.totalStake()).to.eq(oldTotalStake - (amountFromCurrStakes));
     });
 
     it('11. check registerValidator', async () => {
@@ -841,9 +874,9 @@ describe("Staking test", function () {
             .emit(staking, "TotalStakeChanged")
             .withArgs(signers[14].address, oldtotalStake, oldtotalStake - diffWei);
 
-        // await expect(tx).to
-        // .emit(staking,"TotalStakeChanged")
-        // .withArgs(signers[16].address, oldtotalStake - diffWei, oldtotalStake);
+        await expect(tx).to
+        .emit(staking,"TotalStakeChanged")
+        .withArgs(signers[16].address, oldtotalStake - diffWei, oldtotalStake);
 
         await expect(tx).to
             .emit(staking, "ClaimWithoutUnboundStake")
