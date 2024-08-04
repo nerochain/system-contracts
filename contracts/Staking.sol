@@ -769,10 +769,10 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     function getPunishRecord(address _val) external view returns (uint256) {
         return lazyPunishRecords[_val].missedBlocksCounter;
     }
-
-    function ethToWei(uint256 ethAmount) private pure returns (uint) {
-        return ethAmount * 1 ether;
-    }
+    // not used
+    // function ethToWei(uint256 ethAmount) private pure returns (uint) {
+    //     return ethAmount * 1 ether;
+    // }
 
     function isReleaseLockEnd() public view returns (bool) {
         return (block.timestamp >= basicLockEnd) && (block.timestamp - basicLockEnd) >= (releasePeriod * releaseCount);

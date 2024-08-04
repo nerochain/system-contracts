@@ -112,6 +112,8 @@ describe("Validator test", function () {
 
         const  amount = await validator.anyClaimable(utils.ethToWei(params.fees),adminAddr.address);
         // console.log(amount[0],amount[1]);
+        let selfSettReward = await validator.getSelfSettledRewards();
+        expect(selfSettReward).eq(0);
 
         expect(await validator.validatorClaimAny(adminAddr.address)).to
         .emit(validator, "RewardsWithdrawn")
@@ -147,6 +149,30 @@ describe("Validator test", function () {
             .withArgs(vaddr, delegator, amount);
     });
 
+    it('5. should correct State for actions', async () => {
+        let state = await validator.state();
+        expect(state).eq(State.Ready);
+        let cando = await validator.canDoStaking()
+        expect(cando).eq(true);
+
+        await validator.setState(State.Idle);
+        let statei = await validator.state();
+        expect(statei).eq(State.Idle);
+        let candoi = await validator.canDoStaking()
+        expect(candoi).eq(true);
+
+        await validator.setState(State.Jail);
+        let statej = await validator.state();
+        expect(statej).eq(State.Jail);
+        let candoj = await validator.canDoStaking()
+        expect(candoj).eq(false);
+
+        await validator.setState(State.Exit);
+        let statee = await validator.state();
+        expect(statee).eq(State.Exit);
+        let candoe = await validator.canDoStaking()
+        expect(candoe).eq(false);
+    })
 })
 
 describe("Validator independent test", function () {
@@ -468,7 +494,8 @@ describe("Validator independent test", function () {
 
         let dlg = await validator.delegators(delegator);
         let oldStake = dlg.stake;
-
+        let length = await validator.getAllDelegatorsLength();
+        expect(length).eq(1);
         let oldPendingUnbound = await validator.testGetClaimableUnbound(delegator);
         expect(oldPendingUnbound).eq(0);
 
@@ -483,7 +510,8 @@ describe("Validator independent test", function () {
         expect(newDlg.settled).eq(oldStake * accRewardsPerStake);
         expect(newDlg.stake).eq(0);
 
-        //console.log(await validator.getPendingUnboundRecord(delegator, 0));
+        let pur = await validator.getPendingUnboundRecord(delegator, 0);
+        expect(pur[0]).eq(oldStake);
         let newPendingUnbound = await validator.testGetClaimableUnbound(delegator);
         expect(newPendingUnbound).eq(oldStake);
 

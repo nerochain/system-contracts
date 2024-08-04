@@ -249,7 +249,8 @@ describe("Staking test", function () {
         let expectAccRPS = params.rewardsPerBlock * BigInt(number);
         var expectAccRPSGwei = utils.ethToWei(expectAccRPS.toString());
         expectAccRPS =  expectAccRPSGwei / BigInt(totalStake.toString());
-
+        let realAccRPS = await staking.simulateUpdateRewardsRecord();
+        expect(expectAccRPS).eq(realAccRPS);
         //console.log(expectAccRPS)
         // validator claimable
         let claimable = expectAccRPS * (params.singleValStake);
@@ -330,6 +331,8 @@ describe("Staking test", function () {
             expect(await staking.getPunishRecord(activeValidators[i])).equal(1);
             expect(lazyVal).equal(activeValidators[i]);
         }
+        let len = await staking.getPunishValidatorsLen();
+        expect(cnt).eq(len);
         let topVals = await staking.getTopValidators(100);
         let valContractAddr = await staking.valMaps(activeValidators[0]);
         let val = valFactory.attach(valContractAddr);
@@ -545,13 +548,13 @@ describe("Staking test", function () {
         // Calculate the upper limit of substake in advance
         // canRelease = 2000000 / 100
         let forceTimeDiff = params.releasePeriod;
-        // let tx = await staking.testReduceBasicLockEnd(forceTimeDiff);
-        // let receipt = await tx.wait();
-        // expect(receipt.status).equal(1);
+        let tx = await staking.testReduceBasicLockEnd(forceTimeDiff);
+        let receipt = await tx.wait();
+        expect(receipt.status).equal(1);
 
         let oldtotalStake = await staking.totalStake();
         expect(await val.state()).equal(2); //Jail
-        await expect(stakingLocked.subStake(signer2.address, deltaEth + 1)).to.be.revertedWith("E22");
+        await expect(stakingLocked.subStake(signer2.address, deltaEth + 1)).to.be.revertedWith("E28");
         let stakingUnLocked = staking.connect(admin50);
 
         await expect(stakingUnLocked.subStake(signer50.address, utils.ethToWei((deltaEth * 8).toString()))).to.be.revertedWith("E31");
@@ -902,4 +905,12 @@ describe("Staking test", function () {
         const admin = await staking.admin();
         expect(admin).to.be.equal(signer22.address);
     });
+    
+    it("math test", async () => {
+        let little = utils.ethToWei("0.5");
+        let big = utils.ethToWei("1.1");
+
+        await expect(staking.testMustConvertStake(little)).to.be.revertedWith("E25");
+        await expect(staking.testMustConvertStake(big)).to.be.revertedWith("E26");
+    })
 })
