@@ -43,7 +43,7 @@ rm test/staking-exit-and-claim.js.bak1
 mv test/staking.js.bak test/staking.js
 rm test/staking.js.bak1
 mv test/validator.js.bak test/validator.js 
-rm test/validator.js.bak1
+
 
 rm -rf coverage
 rm -rf artifacts
