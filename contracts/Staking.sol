@@ -778,8 +778,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         return (block.timestamp >= basicLockEnd) && (block.timestamp - basicLockEnd) >= (releasePeriod * releaseCount);
     }
 
-    // #if Mainnet
-    // #else
+    // #if !Mainnet
     function simulateUpdateRewardsRecord() public view returns (uint256) {
         uint deltaBlock = block.number - lastUpdateAccBlock;
         if (deltaBlock > 0) {

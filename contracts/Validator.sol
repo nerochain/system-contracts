@@ -678,8 +678,7 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         return allDelegatorAddrs.length;
     }
 
-    // #if Mainnet
-    // #else
+    // #if !Mainnet
     function getSelfDebt() public view returns (uint256) {
         return selfDebt;
     }
