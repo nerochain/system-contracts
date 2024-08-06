@@ -110,6 +110,7 @@ contract GenesisLock {
      *   user claim the unlocked asset
      */
     function claim() external {
+        require(rightsChanging[msg.sender] == address(0),"All right on changing");
         (uint256 claimableAmt, uint256 period) = getClaimableAmount(msg.sender);
         require(claimableAmt > 0 && period > 0, "Have no token released");
 
@@ -218,7 +219,7 @@ contract GenesisLock {
         view
         returns (
             uint256 typId,
-            uint256 lockedAount,
+            uint256 lockedAmount,
             uint256 firstLockTime,
             uint256 totalPeriod,
             uint256 alreadyClaimed,
@@ -226,7 +227,7 @@ contract GenesisLock {
         )
     {
         typId = userType[account];
-        lockedAount = userLockedAmount[account];
+        lockedAmount = userLockedAmount[account];
         firstLockTime = firstPeriodLockedTime[account];
         totalPeriod = lockedPeriodAmount[account];
         alreadyClaimed = claimedPeriod[account];
