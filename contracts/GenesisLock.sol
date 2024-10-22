@@ -94,8 +94,6 @@ contract GenesisLock {
         require(msg.value > 100 ether, "too trivial");
         require(_userAddr != address(0), "zero address");
         require(_typeId > 0, "need a type id for human read");
-        require(_firstLockTime <= 366 days, "firstLockTime violating WhitePaper rules");
-        require(_lockPeriodCnt > 0 && _lockPeriodCnt <= 48, "lockPeriodCnt violating WhitePaper rules");
         require(userLockedAmount[_userAddr] == 0, "user address already have lock-up");
 
         userType[_userAddr] = _typeId;
