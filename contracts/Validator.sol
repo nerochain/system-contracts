@@ -322,7 +322,10 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
             }
             if (stakeBeforeSlash > 0) {
                 // update rewards info
-                uint expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
+                uint expectRewardsWithoutSlash = 0;
+                if (accRewardsPerStake * stakeBeforeSlash > dlg.debt) {
+                    expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
+                }
                 // Calculated based on the proportion of staking amount before and after slash.
                 uint rewards = (expectRewardsWithoutSlash * dlg.stake) / stakeBeforeSlash;
                 dlg.settled += rewards;
@@ -594,7 +597,13 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
 
     function validatorClaimableRewards(uint _expectedCommission, uint _deltaRPS) private view returns (uint) {
         // the rewards was enlarged by COEFFICIENT times
-        uint claimable = (accRewardsPerStake + _deltaRPS) * selfStake + selfSettledRewards - selfDebt;
+        uint lhs = (accRewardsPerStake + _deltaRPS) * selfStake + selfSettledRewards;
+        uint claimable = 0;
+        if (lhs > selfDebt) {
+            claimable = lhs - selfDebt;
+        } else {
+            claimable = 0; // saturating at 0 to avoid underflow on view path
+        }
         claimable = claimable + _expectedCommission;
         // actual rewards in wei
         claimable = claimable / COEFFICIENT;
@@ -623,7 +632,10 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         uint rewards = 0;
         if (stakeBeforeSlash > 0) {
             // staking rewards
-            uint expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
+            uint expectRewardsWithoutSlash = 0;
+            if (accRewardsPerStake * stakeBeforeSlash > dlg.debt) {
+                expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
+            }
             // Calculated based on the proportion of staking amount before and after slash.
             rewards = (expectRewardsWithoutSlash * dlg.stake) / stakeBeforeSlash;
             rewards += dlg.stake * _deltaRPS;

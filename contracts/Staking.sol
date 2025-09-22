@@ -614,7 +614,10 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     function updateRewardsRecord() private {
         uint deltaBlock = block.number - lastUpdateAccBlock;
         if (deltaBlock > 0) {
-            accRewardsPerStake += (rewardsPerBlock * COEFFICIENT * deltaBlock) / totalStake;
+            if (totalStake > 0) {
+                accRewardsPerStake += (rewardsPerBlock * COEFFICIENT * deltaBlock) / totalStake;
+            }
+            // Always advance lastUpdateAccBlock to avoid accruing zero-stake periods to later stakers
             lastUpdateAccBlock = block.number;
         }
     }
@@ -739,7 +742,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         // calculates current expected accRewards
         uint deltaBlock = block.number - lastUpdateAccBlock;
         uint expectedAccRPS = accRewardsPerStake;
-        if (deltaBlock > 0) {
+        if (deltaBlock > 0 && totalStake > 0) {
             expectedAccRPS += (rewardsPerBlock * COEFFICIENT * deltaBlock) / totalStake;
         }
         ValidatorInfo memory vInfo = valInfos[_val];
@@ -781,7 +784,7 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
     // #if !Mainnet
     function simulateUpdateRewardsRecord() public view returns (uint256) {
         uint deltaBlock = block.number - lastUpdateAccBlock;
-        if (deltaBlock > 0) {
+        if (deltaBlock > 0 && totalStake > 0) {
             return accRewardsPerStake + (rewardsPerBlock * COEFFICIENT * deltaBlock) / totalStake;
         }
         return accRewardsPerStake;
