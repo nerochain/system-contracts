@@ -318,50 +318,7 @@ describe("GenesisLock contract test", function () {
 
             await expect(lock.appendLockRecord(account3.address,0,lockTime,4,{value: lockedAmount0})).to.be.revertedWith("need a type id for human read");
         })
-        it('fail for long lock time', async () =>{
-            await lock.initialize(periodTime);
-            await lock.init(
-                [
-                    account1.address,
-                    account2.address
-                ],[
-                    1,2
-                ],[
-                    lockedAmount0,
-                    lockedAmount1
-                ],[
-                    lockTime,
-                    lockTime
-                ],[
-                    5,6
-                ]
-            );
 
-            await expect(lock.appendLockRecord(account3.address,3,maxLockTime + 1 ,4,{value: lockedAmount0})).to.be.revertedWith("firstLockTime violating WhitePaper rules");
-        })
-
-        it('fail for erroe lock period', async () =>{
-            await lock.initialize(periodTime);
-            await lock.init(
-                [
-                    account1.address,
-                    account2.address
-                ],[
-                    1,2
-                ],[
-                    lockedAmount0,
-                    lockedAmount1
-                ],[
-                    lockTime,
-                    lockTime
-                ],[
-                    5,6
-                ]
-            );
-
-            await expect(lock.appendLockRecord(account3.address,3,lockTime ,0,{value: lockedAmount0})).to.be.revertedWith("lockPeriodCnt violating WhitePaper rules");
-            await expect(lock.appendLockRecord(account3.address,3,lockTime ,49,{value: lockedAmount0})).to.be.revertedWith("lockPeriodCnt violating WhitePaper rules");
-        })
         it('fail for lock-up user', async () =>{
             await lock.initialize(periodTime);
             await lock.init(

@@ -305,6 +305,8 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
         return (_stake, _forceUnbound);
     }
 
+    // handleDelegatorPunishment handles the punishment to a delegator,
+    // if there is a slash from stake, update the rewards and debt.
     function handleDelegatorPunishment(address _delegator) private {
         uint amount = calcDelegatorPunishment(_delegator);
         // update punishFree
@@ -322,10 +324,10 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
             }
             if (stakeBeforeSlash > 0) {
                 // update rewards info
-                uint expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
+                uint expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash + dlg.settled - dlg.debt;
                 // Calculated based on the proportion of staking amount before and after slash.
                 uint rewards = (expectRewardsWithoutSlash * dlg.stake) / stakeBeforeSlash;
-                dlg.settled += rewards;
+                dlg.settled = rewards;
                 dlg.debt = dlg.stake * accRewardsPerStake;
             }
         }
@@ -546,7 +548,7 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
     function punish(uint _factor) external payable override onlyOwner {
         handleReceivedRewards();
         // First, settle rewards for validator (important!)
-        selfSettledRewards += (selfStake * accRewardsPerStake) - selfDebt;
+        selfSettledRewards = (selfStake * accRewardsPerStake) + selfSettledRewards - selfDebt;
         // Second, punish according to totalUnWithdrawn
         uint slashAmount = (totalUnWithdrawn * _factor) / PunishBase;
         if (totalStake >= slashAmount) {
@@ -619,18 +621,21 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
                 slashAmountFromPending = slashAmount - dlg.stake;
                 dlg.stake = 0;
             }
+            // re-calculate the rewards,
+            // deduct the portion of the rewards that corresponds to the slash amount.
+            // Notice: The amount deducted may be greater than the actual amount that
+            // should be deducted, but this can NOT be avoided.
+
+            // staking rewards before slash
+            uint claimableRewards = accRewardsPerStake * stakeBeforeSlash + dlg.settled - dlg.debt;
+            // update settled and debt in memory after slash
+            dlg.settled = (claimableRewards * dlg.stake) / stakeBeforeSlash;
+            dlg.debt = dlg.stake * accRewardsPerStake;
         }
-        uint rewards = 0;
-        if (stakeBeforeSlash > 0) {
-            // staking rewards
-            uint expectRewardsWithoutSlash = accRewardsPerStake * stakeBeforeSlash - dlg.debt;
-            // Calculated based on the proportion of staking amount before and after slash.
-            rewards = (expectRewardsWithoutSlash * dlg.stake) / stakeBeforeSlash;
-            rewards += dlg.stake * _deltaRPS;
-            rewards += dlg.settled;
-            // actual rewards in wei
-            rewards = rewards / COEFFICIENT;
-        }
+        // calculates final claimable rewards
+        uint rewards = (accRewardsPerStake + _deltaRPS) * dlg.stake + dlg.settled - dlg.debt;
+        // actual rewards in wei
+        rewards = rewards / COEFFICIENT;
 
         uint stake = 0;
         // calculates withdraw-able stakes
