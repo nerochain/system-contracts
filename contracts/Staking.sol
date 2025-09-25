@@ -796,4 +796,39 @@ contract Staking is Initializable, Params, SafeSend, WithAdmin, ReentrancyGuard 
         return basicLockEnd;
     }
     // #endif
+
+    // ** Batch functions for query and operations **
+
+    // @dev batchAnyClaimable returns how much token(rewards and unbound stakes) can be currently claimed
+    // for the specific stakeOwner across multiple validators.
+    // @param _vals, an array of validator addresses.
+    // @param _stakeOwner, the address of the stake owner.
+    function batchAnyClaimable(address[] calldata _vals, address _stakeOwner) external view returns (uint[] memory) {
+        uint[] memory results = new uint[](_vals.length);
+        for (uint i = 0; i < _vals.length; i++) {
+            results[i] = claimableHandler(_vals[i], _stakeOwner, true);
+        }
+        return results;
+    }
+
+    // @dev batchClaimableRewards returns how much rewards can be currently claimed
+    // for the specific stakeOwner across multiple validators.
+    // @param _vals, an array of validator addresses.
+    // @param _stakeOwner, the address of the stake owner.
+    function batchClaimableRewards(address[] calldata _vals, address _stakeOwner) external view returns (uint[] memory) {
+        uint[] memory results = new uint[](_vals.length);
+        for (uint i = 0; i < _vals.length; i++) {
+            results[i] = claimableHandler(_vals[i], _stakeOwner, false);
+        }
+        return results;
+    }
+
+    // @dev batchDelegatorClaimAny allows a delegator to claim rewards and unbound stakes from multiple validators.
+    // @param _vals, an array of validator addresses to claim from.
+    function batchDelegatorClaimAny(address[] calldata _vals) external nonReentrant {
+        for (uint i = 0; i < _vals.length; i++) {
+            require(valMaps[_vals[i]] != IValidator(address(0)), "E08");
+            doClaimAny(_vals[i], false);
+        }
+    }
 }
