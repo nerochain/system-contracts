@@ -241,9 +241,11 @@ contract Validator is Params, WithAdmin, SafeSend, IValidator {
 
         handleDelegatorPunishment(_delegator);
 
-        uint oldStake = dlg.stake;
-        RankingOp op = innerSubDelegation(oldStake, _delegator, true);
-        return (op, oldStake);
+        // Use current stake after punishment; punishment may have slashed part of the delegation.
+        uint stakeToExit = delegators[_delegator].stake;
+        require(stakeToExit > 0, "E34");
+        RankingOp op = innerSubDelegation(stakeToExit, _delegator, true);
+        return (op, stakeToExit);
     }
 
     function innerSubDelegation(uint256 _stake, address _delegator, bool _isUnbound) private returns (RankingOp) {
